@@ -1,0 +1,85 @@
+#!/bin/bash
+# Start script of the clawbook-lehre image (runs as root).
+#
+# 1. Fills the home directory of "student" with the image defaults
+#    (only files that do not exist yet - nothing is overwritten).
+# 2. Creates the SSH key of "student" if it is missing.
+# 3. Shows how to connect, including the private key.
+# 4. Starts the SSH server. With a terminal attached, "student" gets a
+#    bash; without one, the SSH server runs in the foreground.
+#
+# Settings (environment variables):
+#   CLAWBOOK_SSH_PORT  host port that is mapped to port 22 (shown only,
+#                      default 2222)
+
+set -euo pipefail
+
+USER_NAME=student
+USER_HOME=/home/${USER_NAME}
+STATE_DIR=${USER_HOME}/.clawbook
+HOST_KEY_DIR=${STATE_DIR}/ssh-host-keys
+SSH_PORT_SHOWN=${CLAWBOOK_SSH_PORT:-2222}
+
+# 1. Image defaults (e.g. agent settings) - never overwrite.
+chown "${USER_NAME}:${USER_NAME}" "${USER_HOME}"
+runuser -u "${USER_NAME}" -- cp -an /opt/clawbook/home-defaults/. "${USER_HOME}/"
+
+# 2. SSH host keys live in the home directory, so the container keeps its
+#    identity when it is recreated from a new image with the same home.
+install -d -m 0700 -o root -g root "${HOST_KEY_DIR}"
+if [ ! -f "${HOST_KEY_DIR}/ssh_host_ed25519_key" ]; then
+  ssh-keygen -q -t ed25519 -N '' -f "${HOST_KEY_DIR}/ssh_host_ed25519_key"
+fi
+
+# The user key: create if missing, show otherwise.
+install -d -m 0700 -o "${USER_NAME}" -g "${USER_NAME}" "${USER_HOME}/.ssh"
+KEY=${USER_HOME}/.ssh/id_ed25519
+if [ ! -f "${KEY}" ]; then
+  runuser -u "${USER_NAME}" -- ssh-keygen -q -t ed25519 -N '' \
+    -C "${USER_NAME}@clawbook" -f "${KEY}"
+  KEY_STATE="neu erzeugt"
+else
+  KEY_STATE="vorhanden"
+fi
+AUTH=${USER_HOME}/.ssh/authorized_keys
+if ! grep -qsF "$(cat "${KEY}.pub")" "${AUTH}"; then
+  cat "${KEY}.pub" >> "${AUTH}"
+fi
+chown "${USER_NAME}:${USER_NAME}" "${AUTH}"
+chmod 0600 "${AUTH}"
+
+# 3. Connection details.
+BUILD=$(sed -n 's/^commit=//p' /etc/clawbook-build 2>/dev/null || true)
+IPS=$(hostname -I 2>/dev/null || true)
+cat <<EOF
+
+================================================================
+ clawbook-lehre  (Build ${BUILD:-unbekannt})
+================================================================
+ Benutzer:        ${USER_NAME}
+ IP im Container: ${IPS:-unbekannt}
+ SSH im Container: Port 22
+ SSH von Windows: ssh -p ${SSH_PORT_SHOWN} ${USER_NAME}@localhost
+                  (wenn der Container mit -p ${SSH_PORT_SHOWN}:22 läuft)
+
+ Privater Schlüssel (${KEY_STATE}) - als Datei speichern,
+ z.B. %USERPROFILE%\\.ssh\\clawbook, und mit ssh -i verwenden:
+----------------------------------------------------------------
+EOF
+cat "${KEY}"
+cat <<EOF
+----------------------------------------------------------------
+ Werkzeuge prüfen: clawbook-check
+================================================================
+
+EOF
+
+# 4. SSH server.
+SSHD=(/usr/sbin/sshd -e -h "${HOST_KEY_DIR}/ssh_host_ed25519_key")
+if [ -t 0 ]; then
+  "${SSHD[@]}"
+  cd "${USER_HOME}"
+  exec runuser -l "${USER_NAME}"
+else
+  exec "${SSHD[@]}" -D
+fi

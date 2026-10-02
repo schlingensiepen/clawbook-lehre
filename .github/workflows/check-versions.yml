@@ -1,0 +1,23 @@
+# Weekly report: which pinned tool versions in deploy/versions.env have
+# newer releases. The report appears in the job summary; raising a version
+# is a deliberate change in deploy/versions.env.
+
+name: Check versions
+
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare pinned and newest versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: deploy/check-versions.sh | tee -a "$GITHUB_STEP_SUMMARY"

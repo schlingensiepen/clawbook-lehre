@@ -1,0 +1,159 @@
+# Builds the image, tests it and publishes it to ghcr.io.
+#
+# Order: lint -> build (load) -> smoke test -> publish. The publish step runs
+# only when lint and smoke test are green, so no untested image is pushed.
+# Tags are computed by docker/metadata-action: branch name, git tag, full
+# commit SHA, and "latest" for the default branch only.
+
+name: Build image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Containerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/Containerfile
+      - name: Lint shell scripts
+        run: |
+          shellcheck deploy/rootfs/usr/local/bin/clawbook-start \
+                     deploy/rootfs/usr/local/bin/clawbook-check \
+                     deploy/check-versions.sh
+
+  build:
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image is several GB; the hosted runner needs room for it.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL
+          docker system prune -af
+          df -h /
+
+      - name: Read pinned versions
+        id: versions
+        run: |
+          {
+            echo "args<<EOF"
+            grep -v '^#' deploy/versions.env | grep .
+            echo "CLAWBOOK_BUILD=${GITHUB_SHA}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build for the smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Containerfile
+          load: true
+          tags: clawbook-lehre:smoke
+          build-args: ${{ steps.versions.outputs.args }}
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          fail() {
+            echo "::error::$1"
+            docker logs clawbook || true
+            exit 1
+          }
+          wait_healthy() {
+            for _ in $(seq 1 60); do
+              status=$(docker inspect -f '{{.State.Health.Status}}' clawbook)
+              [ "$status" = healthy ] && return 0
+              sleep 2
+            done
+            fail "container did not become healthy (status: $status)"
+          }
+
+          docker volume create clawbook-home
+          docker run -d --name clawbook -p 127.0.0.1:2222:22 \
+            -v clawbook-home:/home/student clawbook-lehre:smoke
+          wait_healthy
+
+          docker exec clawbook clawbook-check || fail "clawbook-check reported missing tools"
+          docker exec clawbook grep -q "commit=${GITHUB_SHA}" /etc/clawbook-build \
+            || fail "build stamp does not match the commit"
+
+          docker cp clawbook:/home/student/.ssh/id_ed25519 ./student_key
+          chmod 600 ./student_key
+          first=$(ssh-keygen -lf ./student_key)
+          docker logs clawbook 2>&1 | grep -q "BEGIN OPENSSH PRIVATE KEY" \
+            || fail "start script did not show the private key"
+
+          ssh_run() {
+            ssh -i ./student_key -p 2222 -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
+                student@127.0.0.1 "$@"
+          }
+          ssh_run 'whoami && clawbook-check --quiet && tmux -V' \
+            || fail "SSH login as student failed"
+
+          # Recreate the container from the same home volume: the user key
+          # must survive.
+          docker rm -f clawbook
+          docker run -d --name clawbook -p 127.0.0.1:2222:22 \
+            -v clawbook-home:/home/student clawbook-lehre:smoke
+          wait_healthy
+          docker cp clawbook:/home/student/.ssh/id_ed25519 ./student_key_after
+          second=$(ssh-keygen -lf ./student_key_after)
+          [ "$first" = "$second" ] || fail "SSH key changed after recreating the container"
+          ssh_run true || fail "SSH login failed after recreating the container"
+
+          docker rm -f clawbook
+          docker volume rm clawbook-home
+          rm -f ./student_key ./student_key_after
+          echo "Smoke test passed."
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=clawbook-lehre
+            org.opencontainers.image.description=Arbeitsrechner für die Arbeit mit KI-Agenten
+
+      # Same daemon, same build args: this build comes from the cache and
+      # pushes exactly the image that passed the smoke test.
+      - name: Publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Containerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ steps.versions.outputs.args }}

@@ -1,0 +1,54 @@
+#!/bin/bash
+# Checks that every tool of the image is present and reports its version.
+# Exit code 0 when all tools answer, 1 otherwise.
+#
+#   clawbook-check          table of all tools
+#   clawbook-check --quiet  only failures
+
+set -uo pipefail
+
+QUIET=0
+[ "${1:-}" = "--quiet" ] && QUIET=1
+
+failed=0
+
+check() {
+  local name=$1
+  shift
+  local out
+  if out=$("$@" 2>&1 | head -n 1) && [ -n "${out}" ]; then
+    [ "${QUIET}" = 1 ] || printf '  %-16s %s\n' "${name}" "${out}"
+  else
+    printf '  %-16s FEHLT (%s)\n' "${name}" "$*"
+    failed=1
+  fi
+}
+
+[ "${QUIET}" = 1 ] || {
+  echo "clawbook-lehre - Werkzeuge"
+  sed 's/^/  /' /etc/clawbook-build 2>/dev/null
+}
+
+check git          git --version
+check gh           gh --version
+check node         node --version
+check npm          npm --version
+check python       python --version
+check uv           uv --version
+check tmux         tmux -V
+check sshd         bash -c 'test -x /usr/sbin/sshd && echo present'
+check claude       claude --version
+check codex        codex --version
+check copilot      copilot --version
+check opencode     opencode --version
+check agy          agy --version
+check playwright   playwright --version
+check playwright-cli bash -c 'command -v playwright-cli'
+check playwright-mcp bash -c 'npm ls -g --depth=0 @playwright/mcp | grep -o "@playwright/mcp@.*"'
+check wikijs-mcp   bash -c 'npm ls -g --depth=0 @cahaseler/wikijs-mcp | grep -o "@cahaseler/wikijs-mcp@.*"'
+check graphify     bash -c 'uv tool list | grep "^graphifyy"'
+check notebooklm   notebooklm --version
+check cookie-fix   bash -c 'command -v notebooklm-fix-cookies'
+check chromium     bash -c 'ls -d /opt/ms-playwright/chromium* | head -n 1'
+
+exit "${failed}"

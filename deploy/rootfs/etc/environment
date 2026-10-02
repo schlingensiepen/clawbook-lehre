@@ -1,0 +1,7 @@
+LANG=de_DE.UTF-8
+TZ=Europe/Berlin
+DISABLE_AUTOUPDATER=1
+NPM_CONFIG_UPDATE_NOTIFIER=false
+PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+UV_TOOL_DIR=/opt/uv-tools
+UV_TOOL_BIN_DIR=/usr/local/bin

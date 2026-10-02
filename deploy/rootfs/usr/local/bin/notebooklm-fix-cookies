@@ -1,0 +1,80 @@
+#!/usr/bin/env python3
+"""Copy fresh cookies from notebook.google.com to notebooklm.google.com.
+
+Google moved NotebookLM from notebooklm.google.com to notebook.google.com.
+The CLI (notebooklm-py) still expects the old domain. Run this script
+after every `notebooklm login`.
+"""
+
+import json
+import shutil
+import sys
+from pathlib import Path
+
+STORAGE_PATHS = [
+    Path.home() / ".notebooklm" / "profiles" / "default" / "storage_state.json",
+    Path.home() / ".notebooklm" / "storage_state.json",
+]
+
+def find_storage():
+    for p in STORAGE_PATHS:
+        if p.exists():
+            return p
+    return None
+
+def fix_cookies(path):
+    shutil.copy2(path, str(path) + ".bak")
+
+    with open(path) as f:
+        data = json.load(f)
+
+    cookies = data.get("cookies", [])
+    nb = {c["name"]: c for c in cookies if c.get("domain") == "notebook.google.com"}
+
+    if not nb:
+        print("No notebook.google.com cookies found - run `notebooklm login` first.")
+        return False
+
+    updated = 0
+    for c in cookies:
+        if c.get("domain") == "notebooklm.google.com" and c["name"] in nb:
+            c["value"] = nb[c["name"]]["value"]
+            c["expires"] = nb[c["name"]].get("expires", c.get("expires"))
+            updated += 1
+
+    if not updated:
+        for name, src in nb.items():
+            clone = dict(src)
+            clone["domain"] = "notebooklm.google.com"
+            cookies.append(clone)
+            updated += 1
+
+    origins = data.get("origins", [])
+    nb_origin = next((o for o in origins if o.get("origin") == "https://notebook.google.com"), None)
+    nlm_origin = next((o for o in origins if o.get("origin") == "https://notebooklm.google.com"), None)
+
+    if nb_origin and not nlm_origin:
+        origins.append({
+            "origin": "https://notebooklm.google.com",
+            "localStorage": list(nb_origin.get("localStorage", []))
+        })
+
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+    print(f"OK - copied {updated} cookies from notebook.google.com to notebooklm.google.com.")
+    return True
+
+def main():
+    path = find_storage()
+    if not path:
+        print("storage_state.json not found.", file=sys.stderr)
+        sys.exit(1)
+
+    if fix_cookies(path):
+        sys.exit(0)
+    else:
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

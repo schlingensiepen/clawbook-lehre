@@ -18,7 +18,35 @@ Dateizugriff aus dem Netz. Wer damit arbeiten will,
 soll nicht jedes Werkzeug einzeln einrichten müssen,
 sondern ein erprobtes Setup auf einmal bekommen.
 
-Das Image wird über GitHub Actions gebaut.
+Das Image wird über GitHub Actions gebaut und unter
+`ghcr.io/schlingensiepen/clawbook-lehre` veröffentlicht.
+
+## Anleitungen
+
+- [Den Arbeitsrechner unter Windows starten](docs/starten-unter-wsl.md)
+  — podman in WSL, Container starten, per SSH
+  verbinden, eigenen Stand behalten
+- [Accounts und Werkzeuge](docs/accounts-und-werkzeuge.md)
+  — welche Zugänge du brauchst und wie du jedes
+  Werkzeug einrichtest
+
+## Aufbau des Repositorys
+
+- `deploy/Containerfile` — Bauanleitung des Images
+- `deploy/versions.env` — festgelegte Versionen aller
+  Werkzeuge; ein wöchentlicher Workflow meldet neuere
+- `deploy/rootfs/` — Dateien, die ins Image kopiert
+  werden (Start-Skript, Prüfskript, Voreinstellungen)
+- `.github/workflows/` — Bau mit Rauchtest und
+  Versions-Bericht
+
+Selbst bauen (mit podman):
+
+```bash
+podman build -f deploy/Containerfile \
+  $(grep -v '^#' deploy/versions.env | grep . | sed 's/^/--build-arg /') \
+  -t clawbook-lehre .
+```
 
 ## Lizenz
 

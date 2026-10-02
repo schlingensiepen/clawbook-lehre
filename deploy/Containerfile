@@ -1,0 +1,137 @@
+# clawbook-lehre: a workstation image for working with AI agents.
+#
+# Build (all versions come from deploy/versions.env):
+#   podman build -f deploy/Containerfile \
+#     $(grep -v '^#' deploy/versions.env | grep . | sed 's/^/--build-arg /') .
+#
+# Layers are ordered by how often they change: base system first,
+# runtimes next, agent CLIs and tools after that, image defaults last.
+# Tools live outside /home/student, so a new image updates them even when
+# the home directory is a persistent volume.
+
+FROM debian:trixie-slim
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=de_DE.UTF-8 \
+    LC_ALL=de_DE.UTF-8 \
+    TZ=Europe/Berlin
+
+# --- Base system -----------------------------------------------------------
+# hadolint ignore=DL3008
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      bash-completion ca-certificates curl git gnupg iproute2 jq less locales \
+      nano openssh-client openssh-server procps python3 python3-pip \
+      python3-venv python-is-python3 pipx sudo tmux tzdata unzip vim-tiny \
+      wget xz-utils \
+ && sed -i 's/^# *de_DE.UTF-8 UTF-8/de_DE.UTF-8 UTF-8/; s/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
+ && locale-gen \
+ && rm -rf /var/lib/apt/lists/*
+
+# --- Working user ------------------------------------------------------------
+# Fixed UID 1000: the usual UID of the first user in a WSL distribution, so
+# file ownership matches on bind mounts. Passwordless sudo: the container is
+# the student's own machine.
+# The password field "*" means "no password", not "locked": key login works.
+RUN useradd --create-home --uid 1000 --shell /bin/bash student \
+ && usermod -p '*' student \
+ && echo 'student ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/student \
+ && chmod 0440 /etc/sudoers.d/student
+
+# --- Runtimes ----------------------------------------------------------------
+ARG NODE_VERSION
+WORKDIR /tmp
+RUN test -n "${NODE_VERSION}" \
+ && curl -fsSLO "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+ && curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" \
+      | grep " node-v${NODE_VERSION}-linux-x64.tar.xz\$" | sha256sum -c - \
+ && tar -xJf "node-v${NODE_VERSION}-linux-x64.tar.xz" -C /usr/local --strip-components=1 \
+      --exclude='*/CHANGELOG.md' --exclude='*/LICENSE' --exclude='*/README.md' \
+ && rm "node-v${NODE_VERSION}-linux-x64.tar.xz" \
+ && node --version && npm --version
+
+ARG UV_VERSION
+RUN test -n "${UV_VERSION}" \
+ && curl -fsSL "https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz" \
+      | tar -xz -C /usr/local/bin --strip-components=1 \
+ && uv --version
+
+ARG GH_VERSION
+RUN test -n "${GH_VERSION}" \
+ && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+      | tar -xz -C /usr/local --strip-components=1 \
+ && gh --version
+
+# --- Agent CLIs --------------------------------------------------------------
+# Installed globally (outside the home directory). Self-updates stay off so
+# the image is what was tested; updates come with a new image.
+ENV DISABLE_AUTOUPDATER=1 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
+ARG CLAUDE_CODE_VERSION
+ARG CODEX_VERSION
+ARG COPILOT_VERSION
+ARG OPENCODE_VERSION
+RUN test -n "${CLAUDE_CODE_VERSION}" -a -n "${CODEX_VERSION}" \
+         -a -n "${COPILOT_VERSION}" -a -n "${OPENCODE_VERSION}" \
+ && npm install -g --omit=dev \
+      "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+      "@openai/codex@${CODEX_VERSION}" \
+      "@github/copilot@${COPILOT_VERSION}" \
+      "opencode-ai@${OPENCODE_VERSION}" \
+ && npm cache clean --force
+
+# Antigravity has no versioned installer; it installs the current release.
+RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin \
+ && test -x /usr/local/bin/agy
+
+# --- Further tools -----------------------------------------------------------
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    UV_TOOL_DIR=/opt/uv-tools \
+    UV_TOOL_BIN_DIR=/usr/local/bin
+
+ARG PLAYWRIGHT_VERSION
+ARG PLAYWRIGHT_CLI_VERSION
+ARG PLAYWRIGHT_MCP_VERSION
+ARG WIKIJS_MCP_VERSION
+RUN test -n "${PLAYWRIGHT_VERSION}" -a -n "${PLAYWRIGHT_CLI_VERSION}" \
+         -a -n "${PLAYWRIGHT_MCP_VERSION}" -a -n "${WIKIJS_MCP_VERSION}" \
+ && npm install -g --omit=dev \
+      "playwright@${PLAYWRIGHT_VERSION}" \
+      "@playwright/cli@${PLAYWRIGHT_CLI_VERSION}" \
+      "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
+      "@cahaseler/wikijs-mcp@${WIKIJS_MCP_VERSION}" \
+ && npm cache clean --force \
+ && playwright install --with-deps chromium \
+ && chmod -R a+rX /opt/ms-playwright \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG GRAPHIFY_VERSION
+ARG NOTEBOOKLM_VERSION
+RUN test -n "${GRAPHIFY_VERSION}" -a -n "${NOTEBOOKLM_VERSION}" \
+ && uv tool install "graphifyy==${GRAPHIFY_VERSION}" \
+ && uv tool install "notebooklm-py==${NOTEBOOKLM_VERSION}" \
+ && chmod -R a+rX /opt/uv-tools \
+ && uv cache clean
+
+# --- Image defaults ----------------------------------------------------------
+COPY deploy/rootfs/ /
+
+RUN chmod 0755 /usr/local/bin/clawbook-start /usr/local/bin/clawbook-check \
+               /usr/local/bin/notebooklm-fix-cookies \
+ && mkdir -p /run/sshd
+
+ARG CLAWBOOK_BUILD=unknown
+RUN printf 'commit=%s\nbuilt=%s\n' "${CLAWBOOK_BUILD}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      > /etc/clawbook-build
+
+WORKDIR /home/student
+EXPOSE 22
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/22' || exit 1
+
+# Runs as root: it starts the SSH server, then hands the shell to "student".
+ENTRYPOINT ["/usr/local/bin/clawbook-start"]
