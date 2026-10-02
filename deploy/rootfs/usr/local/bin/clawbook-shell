@@ -1,0 +1,9 @@
+#!/bin/bash
+# Main command of the container. With a terminal attached, "student" gets a
+# login shell (the container stops when it ends). Without a terminal the
+# container just keeps running for SSH, RDP and Samba.
+if [ -t 0 ]; then
+  cd /home/student || exit 1
+  exec runuser -l student
+fi
+exec sleep infinity

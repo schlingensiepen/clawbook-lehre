@@ -1,0 +1,3 @@
+#!/bin/bash
+# Samba file server: share "student" = /home/student (etc/samba/smb.conf).
+exec /usr/sbin/smbd --foreground --no-process-group --debug-stdout

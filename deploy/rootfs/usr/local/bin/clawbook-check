@@ -49,6 +49,11 @@ check wikijs-mcp   bash -c 'npm ls -g --depth=0 @cahaseler/wikijs-mcp | grep -o 
 check graphify     bash -c 'uv tool list | grep "^graphifyy"'
 check notebooklm   notebooklm --version
 check cookie-fix   bash -c 'command -v notebooklm-fix-cookies'
-check chromium     bash -c 'ls -d /opt/ms-playwright/chromium* | head -n 1'
+check chromium-pw  bash -c 'ls -d /opt/ms-playwright/chromium* | head -n 1'
+check chromium     chromium --version
+check weston       weston --version
+# shellcheck disable=SC2016  # ${Version} is a dpkg-query field, not a shell variable
+check samba        dpkg-query -W -f='samba ${Version}' samba
+check s6-overlay   bash -c 'test -x /init && echo present'
 
 exit "${failed}"

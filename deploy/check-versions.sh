@@ -33,6 +33,7 @@ row() {
   echo "| ${name} | ${pinned} | ${latest} | ${note} |"
 }
 
+row "s6-overlay"     "${S6_OVERLAY_VERSION}"     "$(gh_latest just-containers/s6-overlay)"
 row "Node.js 22"     "${NODE_VERSION}"           "$(node22_latest)"
 row "uv"             "${UV_VERSION}"             "$(gh_latest astral-sh/uv)"
 row "GitHub CLI"     "${GH_VERSION}"             "$(gh_latest cli/cli)"

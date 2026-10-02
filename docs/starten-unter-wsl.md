@@ -1,13 +1,10 @@
 # Den Arbeitsrechner unter Windows starten
 
 Diese Anleitung zeigt, wie du das Image unter Windows
-mit WSL und podman startest, dich per SSH verbindest
-und deinen eigenen Stand behältst.
-
-> **Stand:** im Aufbau. Die Anleitung beschreibt das
-> erste Image: Werkzeuge und SSH-Zugang. Grafische
-> Oberfläche (Browser per Remote-Desktop) und
-> Dateizugriff per Windows-Freigabe folgen.
+mit WSL und podman startest, dich per SSH verbindest,
+den Bildschirm des Containers per Remote-Desktop
+siehst, seine Dateien unter Windows öffnest und
+deinen eigenen Stand behältst.
 
 ## Worum es geht
 
@@ -58,6 +55,17 @@ Das `sudo` hier betrifft nur die Linux-Distribution in
 WSL — dort bist du selbst Administrator, unter Windows
 brauchst du dafür keine Rechte.
 
+Damit die Windows-Dateifreigabe (Samba, Port 445)
+funktioniert, muss podman als normaler Benutzer diesen
+Port öffnen dürfen. Das erlaubst du einmalig in der
+WSL-Distribution:
+
+```bash
+echo 'net.ipv4.ip_unprivileged_port_start=445' \
+  | sudo tee /etc/sysctl.d/90-clawbook.conf
+sudo sysctl --system
+```
+
 ## 3. Das Image holen und starten
 
 Zuerst ein **Volume** für dein Home-Verzeichnis
@@ -74,6 +82,8 @@ Dann den Container starten:
 ```bash
 podman run -it --name clawbook \
   -p 127.0.0.1:2222:22 \
+  -p 127.0.0.1:3390:3389 \
+  -p 445:445 \
   -v clawbook-home:/home/student \
   ghcr.io/schlingensiepen/clawbook-lehre:latest
 ```
@@ -85,14 +95,23 @@ Was die Teile bedeuten:
   ist unter Windows als `localhost:2222` erreichbar.
   Nicht Port 22: den kann Windows selbst belegen, dann
   käme deine Verbindung beim falschen Dienst an.
+- `-p 127.0.0.1:3390:3389` — der Bildschirm des
+  Containers (Remote-Desktop) unter `localhost:3390`;
+  nicht 3389, das ist der Remote-Desktop von Windows
+  selbst.
+- `-p 445:445` — die Dateifreigabe. Port 445 belegt
+  Windows auf `localhost` selbst; deshalb erreichst du
+  die Freigabe über die IP-Adresse der WSL-Distribution
+  (siehe Schritt 6).
 - `-v clawbook-home:/home/student` — dein
   Home-Verzeichnis liegt im Volume und überlebt
   Neustarts und neue Image-Versionen.
 
 Beim Start zeigt der Container einen Kasten mit den
-Verbindungsdaten und deinem **privaten SSH-Schlüssel**.
-Beim allerersten Start wird der Schlüssel erzeugt,
-danach wird derselbe wieder angezeigt.
+Verbindungsdaten, deinem **privaten SSH-Schlüssel** und
+dem **Passwort für die Dateifreigabe**. Beim
+allerersten Start werden beide erzeugt, danach werden
+dieselben wieder angezeigt.
 
 ## 4. Per SSH verbinden
 
@@ -125,7 +144,45 @@ SSH-Verbindungen und tmux-Sitzungen verwalten.
 Im Container prüfst du mit `clawbook-check`, ob alle
 Werkzeuge da sind.
 
-## 5. Beenden und wieder starten
+## 5. Den Bildschirm des Containers sehen
+
+Der Container hat einen eigenen Bildschirm, vor allem
+für den Browser: Wenn ein Agent eine Webseite öffnen
+oder du dich bei einem Dienst im Browser anmelden
+musst, geschieht das dort.
+
+Unter Windows „Remotedesktopverbindung" (`mstsc`)
+starten und als Computer `localhost:3390` eingeben.
+Das Zertifikat ist selbst ausgestellt — die Warnung
+bestätigen. Ein Passwort gibt es nicht: der Bildschirm
+ist nur von deinem eigenen Rechner aus erreichbar.
+
+Oben in der Leiste startest du Chromium und ein
+Terminal, beide als `student`.
+
+## 6. Die Dateien unter Windows öffnen
+
+Das Home-Verzeichnis von `student` ist als
+Windows-Freigabe erreichbar. Du brauchst dafür die
+IP-Adresse deiner WSL-Distribution — in WSL:
+
+```bash
+hostname -I
+```
+
+Die erste Adresse (z.B. `172.27.112.5`) gibst du im
+Windows-Explorer ein:
+
+```text
+\\172.27.112.5\student
+```
+
+Anmelden mit Benutzer `student` und dem Passwort aus
+dem Start-Kasten. Die Adresse kann sich nach einem
+Neustart von Windows ändern; dann `hostname -I` erneut
+aufrufen.
+
+## 7. Beenden und wieder starten
 
 - Die Shell aus Schritt 3 mit `exit` verlassen — der
   Container stoppt.
@@ -142,7 +199,7 @@ Werkzeuge da sind.
   podman start clawbook
   ```
 
-## 6. Deinen Stand behalten und wiederverwenden
+## 8. Deinen Stand behalten und wiederverwenden
 
 **Der Normalfall: das Volume.** Alles in
 `/home/student` liegt im Volume `clawbook-home`. Die
@@ -156,6 +213,7 @@ startest neu — dein Stand bleibt:
 podman pull ghcr.io/schlingensiepen/clawbook-lehre:latest
 podman rm clawbook
 podman run -it --name clawbook -p 127.0.0.1:2222:22 \
+  -p 127.0.0.1:3390:3389 -p 445:445 \
   -v clawbook-home:/home/student \
   ghcr.io/schlingensiepen/clawbook-lehre:latest
 ```
@@ -198,6 +256,12 @@ offiziellen Images bekommst du so nicht mehr.
 - **`ssh` fragt nach einem Passwort** — der Schlüssel
   wurde nicht gefunden oder nicht vollständig
   gespeichert; `-i` und Dateiinhalt prüfen.
+- **Fehler beim Start: Port 445 nicht erlaubt** — die
+  Einstellung `ip_unprivileged_port_start` aus Schritt 2
+  fehlt.
+- **Explorer findet `\\<IP>\student` nicht** — IP
+  mit `hostname -I` in WSL prüfen; läuft der Container
+  (`podman ps`)?
 - **Warnung „REMOTE HOST IDENTIFICATION HAS CHANGED"**
   — das passiert nur, wenn du das Volume neu angelegt
   hast; dann den Eintrag für `[localhost]:2222` aus

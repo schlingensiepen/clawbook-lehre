@@ -1,0 +1,22 @@
+#!/bin/bash
+# Weston as RDP server (no GPU, software rendering) with XWayland on
+# DISPLAY=:0. It runs as root; programs of "student" (e.g. a browser started
+# by an agent) show up on the same screen via XWayland.
+set -euo pipefail
+
+export HOME=/root
+export XDG_RUNTIME_DIR=/run/weston-rdp
+export WAYLAND_DISPLAY=wayland-1
+export LIBSEAT_BACKEND=builtin
+export SEATD_VTBOUND=0
+
+install -d -m 0700 "${XDG_RUNTIME_DIR}"
+install -d -m 1777 /tmp/.X11-unix
+
+# Allow local X clients of other users once XWayland is up.
+( for _ in $(seq 1 30); do
+    sleep 1
+    if DISPLAY=:0 xhost +local: >/dev/null 2>&1; then exit 0; fi
+  done ) &
+
+exec weston --config=/etc/weston/weston.ini --port=3389

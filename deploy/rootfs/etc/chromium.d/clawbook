@@ -1,0 +1,3 @@
+# Inside a container: no GPU, and the Chromium sandbox needs user
+# namespaces that a rootless container usually does not offer.
+export CHROMIUM_FLAGS="$CHROMIUM_FLAGS --no-sandbox --disable-gpu"

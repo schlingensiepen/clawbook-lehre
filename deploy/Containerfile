@@ -26,9 +26,30 @@ RUN apt-get update \
       nano openssh-client openssh-server procps python3 python3-pip \
       python3-venv python-is-python3 pipx sudo tmux tzdata unzip vim-tiny \
       wget xz-utils \
+      chromium fonts-dejavu-core openssl samba weston x11-xserver-utils \
+      xterm xwayland \
  && sed -i 's/^# *de_DE.UTF-8 UTF-8/de_DE.UTF-8 UTF-8/; s/^# *en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen \
  && locale-gen \
  && rm -rf /var/lib/apt/lists/*
+
+# --- Process supervisor ----------------------------------------------------
+# s6-overlay runs several services (SSH, RDP, Samba) in one container,
+# restarts them when they crash and runs the init step before them.
+ARG S6_OVERLAY_VERSION
+RUN test -n "${S6_OVERLAY_VERSION}" \
+ && for part in noarch x86_64; do \
+      curl -fsSLo "/tmp/s6-${part}.tar.xz" \
+        "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${part}.tar.xz" \
+   && curl -fsSL "https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-${part}.tar.xz.sha256" \
+        | sed "s#s6-overlay-${part}.tar.xz#/tmp/s6-${part}.tar.xz#" | sha256sum -c - \
+   && tar -C / -Jxpf "/tmp/s6-${part}.tar.xz" \
+   && rm "/tmp/s6-${part}.tar.xz"; \
+    done
+
+ENV S6_KEEP_ENV=1 \
+    S6_BEHAVIOUR_IF_STAGE2_FAILS=2 \
+    S6_CMD_WAIT_FOR_SERVICES_MAXTIME=0 \
+    S6_VERBOSITY=1
 
 # --- Working user ------------------------------------------------------------
 # Fixed UID 1000: the usual UID of the first user in a WSL distribution, so
@@ -119,8 +140,8 @@ RUN test -n "${GRAPHIFY_VERSION}" -a -n "${NOTEBOOKLM_VERSION}" \
 # --- Image defaults ----------------------------------------------------------
 COPY deploy/rootfs/ /
 
-RUN chmod 0755 /usr/local/bin/clawbook-start /usr/local/bin/clawbook-check \
-               /usr/local/bin/notebooklm-fix-cookies \
+RUN chmod 0755 /etc/cont-init.d/10-clawbook /etc/services.d/*/run \
+               /usr/local/bin/clawbook-* /usr/local/bin/notebooklm-fix-cookies \
  && mkdir -p /run/sshd
 
 ARG CLAWBOOK_BUILD=unknown
@@ -128,10 +149,13 @@ RUN printf 'commit=%s\nbuilt=%s\n' "${CLAWBOOK_BUILD}" "$(date -u +%Y-%m-%dT%H:%
       > /etc/clawbook-build
 
 WORKDIR /home/student
-EXPOSE 22
+# 22 SSH, 3389 RDP (Weston), 445 Samba
+EXPOSE 22 3389 445
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/22' || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["bash", "-c", "for p in 22 3389 445; do (exec 3<>/dev/tcp/127.0.0.1/$p) || exit 1; done"]
 
-# Runs as root: it starts the SSH server, then hands the shell to "student".
-ENTRYPOINT ["/usr/local/bin/clawbook-start"]
+# s6-overlay is PID 1 (as root): init step, then the services, then the
+# main command - a shell for "student" when a terminal is attached.
+ENTRYPOINT ["/init"]
+CMD ["/usr/local/bin/clawbook-shell"]

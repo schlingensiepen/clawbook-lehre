@@ -27,9 +27,11 @@ jobs:
           dockerfile: deploy/Containerfile
       - name: Lint shell scripts
         run: |
-          shellcheck deploy/rootfs/usr/local/bin/clawbook-start \
-                     deploy/rootfs/usr/local/bin/clawbook-check \
-                     deploy/check-versions.sh
+          shellcheck deploy/rootfs/etc/cont-init.d/10-clawbook \
+                     deploy/rootfs/etc/services.d/*/run \
+                     deploy/rootfs/usr/local/bin/clawbook-* \
+                     deploy/check-versions.sh \
+                     deploy/smoke-test.sh
 
   build:
     needs: lint
@@ -71,59 +73,8 @@ jobs:
 
       - name: Smoke test
         run: |
-          set -euo pipefail
-          fail() {
-            echo "::error::$1"
-            docker logs clawbook || true
-            exit 1
-          }
-          wait_healthy() {
-            for _ in $(seq 1 60); do
-              status=$(docker inspect -f '{{.State.Health.Status}}' clawbook)
-              [ "$status" = healthy ] && return 0
-              sleep 2
-            done
-            fail "container did not become healthy (status: $status)"
-          }
-
-          docker volume create clawbook-home
-          docker run -d --name clawbook -p 127.0.0.1:2222:22 \
-            -v clawbook-home:/home/student clawbook-lehre:smoke
-          wait_healthy
-
-          docker exec clawbook clawbook-check || fail "clawbook-check reported missing tools"
-          docker exec clawbook grep -q "commit=${GITHUB_SHA}" /etc/clawbook-build \
-            || fail "build stamp does not match the commit"
-
-          docker cp clawbook:/home/student/.ssh/id_ed25519 ./student_key
-          chmod 600 ./student_key
-          first=$(ssh-keygen -lf ./student_key)
-          docker logs clawbook 2>&1 | grep -q "BEGIN OPENSSH PRIVATE KEY" \
-            || fail "start script did not show the private key"
-
-          ssh_run() {
-            ssh -i ./student_key -p 2222 -o StrictHostKeyChecking=no \
-                -o UserKnownHostsFile=/dev/null -o BatchMode=yes \
-                student@127.0.0.1 "$@"
-          }
-          ssh_run 'whoami && clawbook-check --quiet && tmux -V' \
-            || fail "SSH login as student failed"
-
-          # Recreate the container from the same home volume: the user key
-          # must survive.
-          docker rm -f clawbook
-          docker run -d --name clawbook -p 127.0.0.1:2222:22 \
-            -v clawbook-home:/home/student clawbook-lehre:smoke
-          wait_healthy
-          docker cp clawbook:/home/student/.ssh/id_ed25519 ./student_key_after
-          second=$(ssh-keygen -lf ./student_key_after)
-          [ "$first" = "$second" ] || fail "SSH key changed after recreating the container"
-          ssh_run true || fail "SSH login failed after recreating the container"
-
-          docker rm -f clawbook
-          docker volume rm clawbook-home
-          rm -f ./student_key ./student_key_after
-          echo "Smoke test passed."
+          sudo apt-get install -y -qq smbclient >/dev/null
+          deploy/smoke-test.sh clawbook-lehre:smoke "${GITHUB_SHA}"
 
       - name: Log in to ghcr.io
         uses: docker/login-action@v4

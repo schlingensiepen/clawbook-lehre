@@ -1,0 +1,3 @@
+#!/bin/bash
+# Starts Chromium as "student" on the RDP screen (used by the panel icon).
+exec runuser -u student -- env DISPLAY=:0 HOME=/home/student chromium "$@"

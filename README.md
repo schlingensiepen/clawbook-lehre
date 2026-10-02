@@ -25,7 +25,8 @@ Das Image wird über GitHub Actions gebaut und unter
 
 - [Den Arbeitsrechner unter Windows starten](docs/starten-unter-wsl.md)
   — podman in WSL, Container starten, per SSH
-  verbinden, eigenen Stand behalten
+  verbinden, Bildschirm per Remote-Desktop, Dateien
+  per Windows-Freigabe, eigenen Stand behalten
 - [Accounts und Werkzeuge](docs/accounts-und-werkzeuge.md)
   — welche Zugänge du brauchst und wie du jedes
   Werkzeug einrichtest
@@ -36,7 +37,10 @@ Das Image wird über GitHub Actions gebaut und unter
 - `deploy/versions.env` — festgelegte Versionen aller
   Werkzeuge; ein wöchentlicher Workflow meldet neuere
 - `deploy/rootfs/` — Dateien, die ins Image kopiert
-  werden (Start-Skript, Prüfskript, Voreinstellungen)
+  werden: Start-Schritt (`etc/cont-init.d`), Dienste
+  SSH, Bildschirm (Weston-RDP) und Samba
+  (`etc/services.d`, gestartet von s6-overlay),
+  Prüfskript, Voreinstellungen
 - `.github/workflows/` — Bau mit Rauchtest und
   Versions-Bericht
 

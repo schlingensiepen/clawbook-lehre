@@ -158,10 +158,11 @@ Anmeldedaten aber noch unter der alten. Ohne diesen
 Schritt meldet jeder Befehl „Authentication expired",
 obwohl die Anmeldung geklappt hat.
 
-_(Hinweis: Solange das Image noch keinen Browser mit
-Bildschirm hat, ist die Anmeldung im Container
-eingeschränkt — dieser Abschnitt wird mit der
-grafischen Oberfläche vervollständigt.)_
+`notebooklm login` öffnet den Browser auf dem
+Bildschirm des Containers — verbinde dich vorher per
+Remote-Desktop (`localhost:3390`, siehe „Den
+Arbeitsrechner unter Windows starten", Schritt 5) und
+melde dich dort bei Google an.
 
 Die Anmeldung läuft nach einiger Zeit ab; dann die drei
 Befehle wiederholen.

@@ -1,0 +1,3 @@
+#!/bin/bash
+# SSH server: key login for "student" only (etc/ssh/sshd_config.d).
+exec /usr/sbin/sshd -D -e -h /home/student/.clawbook/ssh-host-keys/ssh_host_ed25519_key
