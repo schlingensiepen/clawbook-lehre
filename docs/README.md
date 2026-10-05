@@ -30,6 +30,12 @@ Datei auf einen anderen Rechner mitnehmen lässt.
    aktualisieren, sichern und auf einen anderen Rechner
    umziehen.
 
+Auf einem **eigenen Rechner**, auf dem alles dauerhaft
+eingerichtet bleiben darf, gibt es außerdem einen Weg mit
+Docker oder podman für Windows, macOS und Linux:
+[Eigener Rechner](privat/README.md). Er ist nicht vom
+Kurs getestet.
+
 Bei Problemen: Jede Seite hat am Ende einen Abschnitt
 „Wenn etwas nicht geht". Wenn der nicht weiterhilft, wende
 dich an die Betreuung deiner Lehrveranstaltung.

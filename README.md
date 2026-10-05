@@ -41,6 +41,9 @@ verbindest, steht in der [Installation](docs/installation.md).
 - [Pflege](docs/pflege.md) — täglich starten,
   aktualisieren, sichern, auf einen anderen Rechner
   umziehen
+- [Eigener Rechner](docs/privat/README.md) — clawbook
+  dauerhaft mit Docker oder podman unter Windows, macOS
+  oder Linux (nicht vom Kurs getestet)
 
 Bei Problemen hilft der Abschnitt „Wenn etwas nicht geht"
 am Ende jeder Seite — und sonst die Betreuung deiner
