@@ -95,7 +95,7 @@ graphify install --platform antigravity
 Auch ohne Agent, im Projektordner:
 
 ```bash
-cd ~/source/<dein-projekt>
+cd ~/source/<Thema>/<Projekt>
 graphify .                       # Graph bauen
 graphify explain "<Begriff>"     # einen Knoten erklären
 graphify path "<Begriff A>" "<Begriff B>"
@@ -122,7 +122,7 @@ Python-Projekt mit `uv` (schneller Ersatz für `pip`
 und `venv`):
 
 ```bash
-cd ~/source/<dein-projekt>
+cd ~/source/<Thema>/<Projekt>
 uv init          # nur bei neuem Projekt: pyproject.toml anlegen
 uv add requests  # Abhängigkeit hinzufügen
 uv run python main.py
@@ -140,7 +140,7 @@ uv tool install ruff
 Node.js-Projekt:
 
 ```bash
-cd ~/source/<dein-projekt>
+cd ~/source/<Thema>/<Projekt>
 npm init -y
 npm install <paket>
 ```

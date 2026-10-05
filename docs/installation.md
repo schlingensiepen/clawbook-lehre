@@ -300,8 +300,9 @@ stehen hier in beiden Sprachen.
 5. **Ordner öffnen**: Menü „Datei → Ordner öffnen…
    (File → Open Folder…)". Oben erscheint ein Eingabefeld
    mit einem Pfad; dort `/home/student/source` eintragen
-   und mit „OK" bestätigen. **Der Ordner ist anfangs leer;
-   das ist richtig** — hier entstehen deine Projekte.
+   und mit „OK" bestätigen. Darin liegt anfangs nur das
+   Beispielprojekt `Sample/primer` — hier entstehen
+   deine Projekte.
 6. Die Frage **„Vertrauen Sie den Autoren der Dateien in
    diesem Ordner? (Do you trust the authors …?)"** mit
    „Ja, ich vertraue den Autoren (Yes, I trust the
@@ -389,10 +390,13 @@ ihren Versionen. Steht irgendwo `FEHLT`, stimmt etwas mit
 dem Image nicht — melde es bei der Betreuung deiner
 Lehrveranstaltung.
 
-Deine Projekte legst du unter `~/source` an. Dafür gibt es
-im Container den WorkspaceManager mit dem Befehl `wsm`,
-der Projektordner anlegt und Agenten darin startet;
-`wsm --help` zeigt seine Möglichkeiten.
+Deine Projekte liegen unter `~/source`, sortiert nach
+Thema: `~/source/<Thema>/<Projekt>`, jedes Projekt ein
+eigenes Git-Repository. Ein erstes Beispiel ist schon da:
+`~/source/Sample/primer` — dort kannst du gefahrlos
+ausprobieren. Neue Projekte legt der WorkspaceManager mit
+dem Befehl `wsm` in genau dieser Struktur an und startet
+Agenten darin; `wsm --help` zeigt seine Möglichkeiten.
 
 Die KI-Werkzeuge sind installiert, aber noch nicht
 angemeldet — die Zugänge gehören dir und kommen nicht aus

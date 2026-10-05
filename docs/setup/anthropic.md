@@ -83,10 +83,10 @@ Zwei Wege zum Zugang:
 Claude Code arbeitet im Ordner, in dem du es startest:
 Es liest dort Dateien, ändert sie und führt Befehle
 aus. Starte es deshalb in einem Projektordner — für
-den ersten Test in einem leeren Übungsordner:
+den ersten Test im Beispielprojekt:
 
 ```bash
-mkdir -p ~/source/uebung && cd ~/source/uebung
+cd ~/source/Sample/primer
 claude
 ```
 

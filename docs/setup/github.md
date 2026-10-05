@@ -136,11 +136,11 @@ nicht weitergeben.
 Copilot CLI ist ein Coding-Agent im Terminal: Er liest
 und ändert Dateien im Ordner, in dem du ihn startest,
 und führt dort Befehle aus. Starte ihn deshalb in
-einem Projektordner — für den ersten Test in einem
-leeren Übungsordner:
+einem Projektordner — für den ersten Test im
+Beispielprojekt:
 
 ```bash
-mkdir -p ~/source/uebung && cd ~/source/uebung
+cd ~/source/Sample/primer
 copilot
 ```
 
@@ -178,7 +178,7 @@ git config --global --list
 
 zeigt `user.name` und `user.email`.
 
-Für Copilot: im Übungsordner `copilot` starten und
+Für Copilot: im Beispielprojekt `copilot` starten und
 eine kleine Aufgabe stellen, zum Beispiel „Lege eine
 Datei hallo.txt mit einem Gruß an". Fragt der Agent
 nach Erlaubnis und legt die Datei an, ist alles
@@ -196,7 +196,7 @@ GitHub-Konto unter Settings → Copilot.
   with your GitHub credentials? Yes" beantwortet, oder
   das Repository ist per SSH-Adresse eingebunden.
   Einmal `gh auth setup-git` ausführen; dann im
-  Projektordner (`cd ~/source/<projekt>`) die
+  Projektordner (`cd ~/source/<Thema>/<Projekt>`) die
   Remote-Adresse mit `git remote -v` prüfen: sie
   sollte mit `https://github.com/` beginnen.
 - **Copilot CLI meldet, dass kein Copilot-Zugang

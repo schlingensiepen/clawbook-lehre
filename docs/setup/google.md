@@ -79,7 +79,7 @@ du es startest. Deshalb in einen Projektordner
 wechseln:
 
 ```bash
-cd ~/source/<dein-projekt>
+cd ~/source/<Thema>/<Projekt>
 agy
 ```
 

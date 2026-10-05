@@ -94,6 +94,11 @@ grep -q "BEGIN OPENSSH PRIVATE KEY" <<<"${logs}" \
 ssh_run 'whoami && clawbook-check --quiet && tmux -V' || fail "SSH login as student failed"
 echo "ssh ok"
 
+# Sample project in the WorkspaceManager layout, a git repo owned by student.
+ssh_run 'git -C ~/source/Sample/primer log --oneline -1 && test -f ~/source/Sample/primer/README.md' \
+  || fail "sample project ~/source/Sample/primer missing"
+echo "sample ok"
+
 # RDP: Weston answers and XWayland provides display :0.
 timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/${RDP_PORT}" \
   || fail "RDP port ${RDP_PORT} does not answer"
@@ -122,6 +127,9 @@ docker cp "${NAME}:/home/student/.ssh/id_ed25519" "${WORK}/key" >/dev/null
 second=$(ssh-keygen -lf "${WORK}/key")
 [ "${first}" = "${second}" ] || fail "SSH key changed after recreating the container"
 ssh_run true || fail "SSH login failed after recreating the container"
+# A deleted sample must not come back.
+ssh_run 'rm -rf ~/source/Sample' && docker restart "${NAME}" >/dev/null && wait_healthy
+ssh_run 'test ! -e ~/source/Sample' || fail "sample project was recreated after deletion"
 echo "recreate ok"
 
 echo "Smoke test passed."

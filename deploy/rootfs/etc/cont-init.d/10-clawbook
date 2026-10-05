@@ -3,7 +3,8 @@
 # s6-overlay (as root, before the services start).
 #
 # 1. Fills the home directory of "student" with the image defaults
-#    (only files that do not exist yet - nothing is overwritten).
+#    (only files that do not exist yet - nothing is overwritten) and, on
+#    the first start of a new home, the sample project ~/source/Sample/primer.
 # 2. Creates the keys and the Samba password if they are missing. All of
 #    them live in the home directory, so they survive a new image as long
 #    as the home volume is kept.
@@ -25,6 +26,20 @@ RDP_PORT_SHOWN=${CLAWBOOK_RDP_PORT:-3390}
 # 1. Image defaults (e.g. agent settings) - never overwrite.
 chown "${USER_NAME}:${USER_NAME}" "${USER_HOME}"
 runuser -u "${USER_NAME}" -- cp -an /opt/clawbook/home-defaults/. "${USER_HOME}/"
+
+# 1b. First start of a new home: sample project in the layout the
+#     WorkspaceManager uses (~/source/<topic>/<project>, each a git repo).
+#     Only when ~/source does not exist yet, so a deleted sample stays gone.
+if [ ! -e "${USER_HOME}/source" ]; then
+  PRIMER=${USER_HOME}/source/Sample/primer
+  runuser -u "${USER_NAME}" -- mkdir -p "${PRIMER}"
+  runuser -u "${USER_NAME}" -- cp -a /opt/clawbook/sample-primer/. "${PRIMER}/"
+  runuser -u "${USER_NAME}" -- git -C "${PRIMER}" init -q -b main
+  runuser -u "${USER_NAME}" -- git -C "${PRIMER}" add -A
+  runuser -u "${USER_NAME}" -- git -C "${PRIMER}" \
+    -c user.name=clawbook -c user.email=clawbook@localhost \
+    commit -q -m "Sample project primer"
+fi
 
 # 2a. Machine keys (SSH host key, RDP certificate): root only.
 install -d -m 0700 -o root -g root "${STATE_DIR}/ssh-host-keys" "${STATE_DIR}/rdp"

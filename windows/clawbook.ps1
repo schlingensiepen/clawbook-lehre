@@ -397,7 +397,7 @@ function Show-Connect {
   Say ' 1. Terminal: Öffne ein neues PowerShell-Fenster und gib ein:'
   Say '       ssh clawbook'
   Say ' 2. VS Code: Remote-SSH → clawbook → Ordner /home/student/source'
-  Say '    (der Ordner ist anfangs leer)'
+  Say '    (dort liegt anfangs das Beispielprojekt Sample/primer)'
   Say " 3. Remotedesktop: mstsc /v:localhost:$RdpPort"
   Say '    Ohne Passwort. Fragt Windows nach dem Zertifikat: „Ja“ wählen.'
   Say ''

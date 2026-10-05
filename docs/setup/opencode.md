@@ -100,7 +100,7 @@ dem du es startest, und führt dort Befehle aus.
 Deshalb immer in einen Projektordner wechseln:
 
 ```bash
-cd ~/source/<dein-projekt>
+cd ~/source/<Thema>/<Projekt>
 opencode
 ```
 
