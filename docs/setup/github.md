@@ -2,6 +2,11 @@
 
 Stand: 2026-10-05
 
+> Die Anbieter ändern ihre Seiten, Menüs und Angebote
+> laufend. Sieht etwas anders aus als hier beschrieben,
+> such dir den aktuellen Weg auf der Seite des Anbieters
+> selbst — das gehört zur Übung.
+
 Mit einem GitHub-Konto bekommst du drei Dinge auf
 einmal: einen Ort für deine Repositories (`git`), das
 Kommandozeilen-Werkzeug `gh` für GitHub selbst und —

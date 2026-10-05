@@ -2,6 +2,11 @@
 
 Stand: 2026-10-05
 
+> Die Anbieter ändern ihre Seiten, Menüs und Angebote
+> laufend. Sieht etwas anders aus als hier beschrieben,
+> such dir den aktuellen Weg auf der Seite des Anbieters
+> selbst — das gehört zur Übung.
+
 **Codex** (`codex`) ist der Coding-Agent von OpenAI im
 Terminal. Er arbeitet wie Claude Code im Ordner, in
 dem du ihn startest, mit den Modellen von OpenAI. Im

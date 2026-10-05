@@ -2,6 +2,11 @@
 
 Stand: 2026-10-05
 
+> Die Anbieter ändern ihre Seiten, Menüs und Angebote
+> laufend. Sieht etwas anders aus als hier beschrieben,
+> such dir den aktuellen Weg auf der Seite des Anbieters
+> selbst — das gehört zur Übung.
+
 **OpenRouter** ist ein Vermittler: Mit einem einzigen
 Konto und einem einzigen API-Schlüssel erreichst du
 Modelle vieler Anbieter (OpenAI, Anthropic, Google,

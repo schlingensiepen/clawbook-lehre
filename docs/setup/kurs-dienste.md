@@ -2,6 +2,11 @@
 
 Stand: 2026-10-05
 
+> Die Anbieter ändern ihre Seiten, Menüs und Angebote
+> laufend. Sieht etwas anders aus als hier beschrieben,
+> such dir den aktuellen Weg auf der Seite des Anbieters
+> selbst — das gehört zur Übung.
+
 Zwei Dienste laufen nicht bei einem Anbieter und nicht
 in deinem Container, sondern **zentral im Kurs**.
 Adresse und Zugang bekommst du von der Kursleitung —
