@@ -28,6 +28,11 @@ zeigt sie, `wsl --update` aktualisiert ohne
 Administrator-Rechte). Was dann passiert und wie du dich
 verbindest, steht in der [Installation](docs/installation.md).
 
+> **Studierst du an der TH Ingolstadt?** In den CIP-Pools
+> sind WSL und WSLC bereits installiert. Willst du
+> clawbook woanders nutzen, folge den Hinweisen zur
+> [Installation zu Hause](docs/installation.md#wsl-zu-hause-installieren).
+
 ## Anleitungen
 
 - [Wegweiser](docs/README.md) — was clawbook ist, in

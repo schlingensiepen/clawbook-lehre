@@ -23,6 +23,11 @@ dasselbe `$env:USERPROFILE`.
 
 ## 1. Voraussetzungen
 
+> **Studierst du an der TH Ingolstadt?** In den CIP-Pools
+> sind WSL und WSLC bereits installiert. Willst du
+> clawbook woanders nutzen, folge den Hinweisen zur
+> [Installation zu Hause](#wsl-zu-hause-installieren).
+
 Du brauchst:
 
 - **Windows 11 oder Windows 10** mit **WSL ab Version
@@ -61,13 +66,49 @@ Version zu alt ist.
 
 Zeigt `wsl --version` einen Fehler oder ist der Befehl
 unbekannt, ist WSL auf dem Rechner noch gar nicht
-installiert. Die **erstmalige Installation** von WSL
-(`wsl --install`) kann Administrator-Rechte brauchen und
-einen Neustart. Auf einem Hochschul-Rechner wende dich dann
+installiert. Auf einem Hochschul-Rechner wende dich dann
 an die IT oder an die Betreuung deiner Lehrveranstaltung;
-auf deinem eigenen Rechner führst du den Befehl in einer
-PowerShell „als Administrator" aus und startest Windows
-danach neu.
+auf deinem eigenen Rechner hilft der nächste Abschnitt.
+
+### WSL zu Hause installieren
+
+Auf deinem eigenen Windows-Rechner richtest du WSL und
+WSLC einmalig selbst ein. Nur der erste Schritt braucht
+Administrator-Rechte.
+
+1. PowerShell **als Administrator** öffnen: Startmenü,
+   „PowerShell" eintippen, Rechtsklick → „Als
+   Administrator ausführen". Dann:
+
+   ```powershell
+   wsl --install --no-distribution
+   ```
+
+   Das installiert WSL ohne eine eigene
+   Linux-Distribution (die brauchst du für clawbook
+   nicht). Danach **Windows neu starten**.
+2. Eine normale PowerShell öffnen (ohne Administrator)
+   und WSL auf den neuesten Stand bringen — damit kommt
+   auch WSLC (der Befehl `wslc`):
+
+   ```powershell
+   wsl --update
+   ```
+
+3. Prüfen:
+
+   ```powershell
+   wsl --version
+   wslc version
+   ```
+
+   Beide müssen mindestens **3.0.1** zeigen.
+
+Klappt Schritt 1 nicht, weil die Virtualisierung
+ausgeschaltet ist (Meldung mit „Virtual Machine Platform"
+oder „Virtualisierung"), muss sie im BIOS/UEFI des
+Rechners eingeschaltet werden; die Microsoft-Anleitung
+dazu: <https://learn.microsoft.com/windows/wsl/install>.
 
 ### OpenSSH-Client prüfen
 
