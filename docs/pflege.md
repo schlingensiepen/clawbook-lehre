@@ -210,13 +210,22 @@ Stand" kennst.
 ## 6. Auf einen anderen Rechner umziehen
 
 Dein ganzer Stand passt in eine Datei. So nimmst du ihn
-mit, zum Beispiel vom Laptop auf den Rechner im Labor:
+mit, zum Beispiel vom Rechner im Pool nach Hause und
+zurück. Auch auf deinem eigenen Windows-Rechner zu Hause
+nimmst du denselben Befehl wie an der Hochschule — der
+Weg mit Docker oder podman unter
+[Eigener Rechner](privat/README.md) ist nur eine
+Alternative für später.
 
 1. Auf dem **alten** Rechner eine Sicherung schreiben
    (Abschnitt 5).
 2. Die Datei `home-<datum>.tar` auf einen USB-Stick oder
    einen verschlüsselten Speicher kopieren (siehe Warnung
-   in Abschnitt 5).
+   in Abschnitt 5). Die Datei ist oft größer als 4 GB:
+   Ein Stick im Format **FAT32** kann sie nicht
+   aufnehmen. Nimm einen Stick mit **exFAT** oder **NTFS**
+   (im Explorer: Rechtsklick auf den Stick →
+   Eigenschaften zeigt das Format) und genug freiem Platz.
 3. Auf dem **neuen** Rechner den Befehl von oben
    ausführen. WSL muss dort die Voraussetzungen erfüllen
    (siehe [Installation](installation.md), Abschnitt 1).
@@ -301,8 +310,10 @@ Sicherungen, der Schlüssel). Deshalb:
    importierst sie jeden Tag neu (Abschnitt 6, Punkt 4).
 2. **Sichere auf einen USB-Stick**, nicht ins Profil —
    so bleibt das Profil klein, und deine Logins liegen
-   nicht auf einem Server der Hochschule. Dafür gibt es
-   die Sicherung direkt auf ein anderes Laufwerk:
+   nicht auf einem Server der Hochschule. Der Stick muss
+   **exFAT** oder **NTFS** formatiert sein (FAT32 nimmt
+   keine Dateien über 4 GB). Dafür gibt es die Sicherung
+   direkt auf ein anderes Laufwerk:
 
    ```powershell
    powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\clawbook\clawbook.ps1" -Action export -File "E:\clawbook\home-2026-10-05.tar"
