@@ -263,10 +263,20 @@ function Wait-Ssh {
 }
 
 function Invoke-Pull($Name) {
-  $code = Invoke-Visible $WslcPath @('pull', $Name)
-  if ($code -ne 0) {
-    Fail "Das Image $Name ließ sich nicht laden. Prüfe deine Internetverbindung und versuche es dann erneut."
+  # Registry connections from inside WSL sometimes time out on the first
+  # attempt, so try a few times before giving up.
+  $attempts = 3
+  for ($i = 1; $i -le $attempts; $i++) {
+    $code = Invoke-Visible $WslcPath @('pull', $Name)
+    if ($code -eq 0) { return }
+    if ($i -lt $attempts) {
+      Say "Der Download hat nicht geklappt (Versuch $i von $attempts). Ich versuche es in 15 Sekunden erneut ..." 'Yellow'
+      Start-Sleep -Seconds 15
+    }
   }
+  Say 'Mögliche Ursachen: keine Internetverbindung, ein aktives VPN, ein Proxy oder eine Firewall der Hochschule.' 'Yellow'
+  Say 'Prüfen kannst du die Verbindung mit:  curl.exe -sI https://ghcr.io/v2/   (eine Antwort mit 401 ist in Ordnung).' 'Yellow'
+  Fail "Das Image $Name ließ sich nicht laden. Prüfe deine Internetverbindung und versuche es dann erneut."
 }
 
 function Ensure-HelperImage {
