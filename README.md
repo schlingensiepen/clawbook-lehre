@@ -8,6 +8,20 @@ es benutzt.
 > gerade; dieses Repository ist noch nicht für den
 > Einsatz gedacht.
 
+## Schnellstart unter Windows
+
+PowerShell öffnen (kein Administrator nötig), diesen
+Befehl einfügen und ausführen:
+
+```powershell
+irm https://raw.githubusercontent.com/schlingensiepen/clawbook-lehre/main/get-clawbook.ps1 | iex
+```
+
+Der Befehl lädt das aktuelle Verwaltungs-Skript und
+zeigt ein Menü: beim ersten Mal „neu einrichten", danach
+„starten", „aktualisieren", „mitnehmen" und mehr.
+Voraussetzung ist WSL ab Version 3.0.1 (`wsl --update`).
+
 ## Was entsteht hier?
 
 Ein vorbereiteter Arbeitsrechner als Container: die

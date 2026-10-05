@@ -25,7 +25,8 @@ Image-Versionen.
 | GitHub Copilot CLI (`copilot`) | GitHub mit Copilot-Abo | über das GitHub Student Developer Pack |
 | Claude Code (`claude`) | Anthropic (Claude-Abo oder API-Schlüssel) | kostenpflichtig |
 | Codex (`codex`) | OpenAI (ChatGPT-Abo oder API-Schlüssel) | kostenpflichtig |
-| OpenCode (`opencode`) | Schlüssel eines KI-Anbieters | je nach Anbieter |
+| OpenCode (`opencode`) | Schlüssel eines KI-Anbieters, z.B. OpenRouter | je nach Anbieter |
+| OpenRouter (für OpenCode u.a.) | OpenRouter | Guthaben nach Verbrauch, einige Modelle kostenlos |
 | Antigravity (`agy`) | Google | Google-Account |
 | NotebookLM (`notebooklm`) | Google | Google-Account |
 | Google Stitch (MCP) | Google Cloud mit API-Schlüssel | Google-Cloud-Projekt |
@@ -124,6 +125,24 @@ Zugang in seiner eigenen Konfiguration in deinem
 Home-Verzeichnis. Trage API-Schlüssel **nicht** in die
 `~/.bashrc` ein — vor allem nicht `ANTHROPIC_API_KEY`
 (siehe Claude Code).
+
+## OpenRouter
+
+**Account:** auf <https://openrouter.ai>. OpenRouter
+bietet mit **einem** API-Schlüssel Zugang zu vielen
+Modellen verschiedener Anbieter; abgerechnet wird nach
+Verbrauch über ein Guthaben, das du vorher auflädst.
+Einige Modelle sind kostenlos nutzbar.
+
+**Einrichten** für OpenCode:
+
+```bash
+opencode auth login
+```
+
+und „OpenRouter" als Anbieter wählen, dann den
+Schlüssel eingeben. Wie bei allen Schlüsseln: nicht in
+die `~/.bashrc` schreiben.
 
 ## Antigravity
 

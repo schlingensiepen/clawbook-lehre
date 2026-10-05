@@ -25,6 +25,23 @@ jobs:
         uses: hadolint/hadolint-action@v3.5.0
         with:
           dockerfile: deploy/Containerfile
+      - name: Lint PowerShell scripts
+        shell: pwsh
+        run: |
+          $files = @('get-clawbook.ps1', 'windows/clawbook.ps1')
+          $bad = 0
+          foreach ($f in $files) {
+            $t = $null; $e = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f).Path, [ref]$t, [ref]$e)
+            foreach ($x in $e) { Write-Host "::error file=$f,line=$($x.Extent.StartLineNumber)::$($x.Message)"; $bad++ }
+          }
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          foreach ($f in $files) {
+            foreach ($r in (Invoke-ScriptAnalyzer -Path $f -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error,Warning)) {
+              Write-Host "::error file=$f,line=$($r.Line)::$($r.RuleName): $($r.Message)"; $bad++
+            }
+          }
+          exit $bad
       - name: Lint shell scripts
         run: |
           shellcheck deploy/rootfs/etc/cont-init.d/10-clawbook \
