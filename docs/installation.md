@@ -33,7 +33,10 @@ Du brauchst:
   wächst mit deinen Projekten. Rechne mit mindestens 20 GB
   freiem Platz.
 - **Internetzugang** zu GitHub und zu `ghcr.io` (dort
-  liegt das Image).
+  liegt das Image). Für den ersten Start werden einige GB
+  geladen: Nimm eine stabile Verbindung (Hochschule,
+  zu Hause), nicht das WLAN im Zug oder einen
+  Handy-Hotspot.
 
 ### WSL prüfen
 

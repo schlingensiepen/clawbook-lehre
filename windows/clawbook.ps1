@@ -275,7 +275,8 @@ function Invoke-Pull($Name) {
     }
   }
   Say 'Mögliche Ursachen: keine Internetverbindung, ein aktives VPN, ein Proxy oder eine Firewall der Hochschule.' 'Yellow'
-  Say 'Prüfen kannst du die Verbindung mit:  curl.exe -sI https://ghcr.io/v2/   (eine Antwort mit 401 ist in Ordnung).' 'Yellow'
+  Say 'Prüfen kannst du die Verbindung mit:  curl.exe -sI https://ghcr.io/v2/   (kommt eine Antwort wie „HTTP/1.1 401“ oder „405“, ist ghcr.io erreichbar).' 'Yellow'
+  Say 'Für den ersten Download brauchst du eine stabile Verbindung – WLAN im Zug oder ein Handy-Hotspot reichen oft nicht.' 'Yellow'
   Fail "Das Image $Name ließ sich nicht laden. Prüfe deine Internetverbindung und versuche es dann erneut."
 }
 
