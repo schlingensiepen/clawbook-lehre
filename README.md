@@ -49,6 +49,15 @@ Bei Problemen hilft der Abschnitt „Wenn etwas nicht geht"
 am Ende jeder Seite — und sonst die Betreuung deiner
 Lehrveranstaltung.
 
+## Empfehlung: tmux-helper
+
+Agenten laufen im Container gern lange in
+tmux-Sitzungen. [tmux-helper](https://github.com/schlingensiepen/tmux-helper)
+öffnet diese Sitzungen unter Windows als Tabs im Windows
+Terminal und verbindet sie per SSH — auch mit
+`clawbook`. Er ist ein eigenes Projekt mit eigenem
+Installationsbefehl und gehört nicht zum Image.
+
 ## Was entsteht hier?
 
 Ein vorbereiteter Arbeitsrechner als Container: die
