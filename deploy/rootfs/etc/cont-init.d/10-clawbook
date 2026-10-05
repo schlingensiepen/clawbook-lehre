@@ -67,7 +67,13 @@ chmod 0600 "${SMB_PW_FILE}"
 SMB_PW=$(cat "${SMB_PW_FILE}")
 printf '%s\n%s\n' "${SMB_PW}" "${SMB_PW}" | smbpasswd -a -s "${USER_NAME}" >/dev/null
 
-# 3. Connection details.
+# 3. Connection details. Samba is only reachable on the podman route
+#    (CLAWBOOK_SAMBA=0 hides it, e.g. under WSLC where Windows owns 445).
+if [ "${CLAWBOOK_SAMBA:-1}" = 1 ]; then
+  SAMBA_LINES=$(printf ' Dateien (Samba):  \\\\<IP der WSL-Distribution>\\%s\n                   Benutzer %s, Passwort %s\n                   (Container mit -p 445:445)\n' "${USER_NAME}" "${USER_NAME}" "${SMB_PW}")
+else
+  SAMBA_LINES=""
+fi
 BUILD=$(sed -n 's/^commit=//p' /etc/clawbook-build 2>/dev/null || true)
 IPS=$(hostname -I 2>/dev/null || true)
 cat <<EOF
@@ -82,10 +88,7 @@ cat <<EOF
                    (Container mit -p 127.0.0.1:${SSH_PORT_SHOWN}:22)
  Bildschirm (RDP): mstsc /v:localhost:${RDP_PORT_SHOWN}
                    (Container mit -p 127.0.0.1:${RDP_PORT_SHOWN}:3389)
- Dateien (Samba):  \\\\<IP der WSL-Distribution>\\${USER_NAME}
-                   Benutzer ${USER_NAME}, Passwort ${SMB_PW}
-                   (Container mit -p 445:445)
-
+${SAMBA_LINES}
  Privater SSH-Schlüssel (${KEY_STATE}) - als Datei speichern,
  z.B. %USERPROFILE%\\.ssh\\clawbook, und mit ssh -i verwenden:
 ----------------------------------------------------------------

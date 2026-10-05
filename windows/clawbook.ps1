@@ -124,7 +124,8 @@ function Wait-Ssh {
   $logs = (Invoke-Wslc logs $Container).Out -split "`n" |
     Where-Object { $_ -notmatch '^[A-Za-z0-9+/=]{30,}$' -and $_ -notmatch 'PRIVATE KEY' } |
     Select-Object -Last 20
-  Fail ("Der Container antwortet nicht auf Port $SshPort.`n" + ($logs -join "`n"))
+  Fail ("Der Container antwortet nicht auf Port $SshPort. Er laeuft vermutlich noch an - " +
+    "in einer Minute erneut 'starten' waehlen.`n" + ($logs -join "`n"))
 }
 
 function Ensure-Image {
@@ -149,7 +150,7 @@ function New-Container {
   $r = Invoke-Wslc run -d --name $Container `
     -p "127.0.0.1:${SshPort}:22" -p "127.0.0.1:${RdpPort}:3389" `
     -v "${Volume}:/home/student" -v "${ExchangeDir}:/home/student/austausch" `
-    -e "CLAWBOOK_SSH_PORT=$SshPort" -e "CLAWBOOK_RDP_PORT=$RdpPort" `
+    -e "CLAWBOOK_SSH_PORT=$SshPort" -e "CLAWBOOK_RDP_PORT=$RdpPort" -e 'CLAWBOOK_SAMBA=0' `
     $Image
   if ($r.Code -ne 0) { Fail "Container konnte nicht gestartet werden:`n$($r.Out)" }
 }
@@ -244,7 +245,7 @@ function Get-FreeBytes($Path) {
   return [int64]$drive.Free
 }
 
-function Export-Home($Target) {
+function Export-Home($Target, [switch]$NoRestart) {
   $s = Get-State
   if (-not $s.Volume) { Fail 'Es gibt kein Home-Volume zum Sichern.' }
   if (-not $Target) { $Target = Join-Path $BackupDir ("home-{0}.tar" -f (Get-Date -Format 'yyyy-MM-dd-HHmm')) }
@@ -264,7 +265,7 @@ function Export-Home($Target) {
   $r = Invoke-Wslc run --rm -v "${Volume}:/h" -v "${dir}:/out" $HelperImage tar -C /h -cpf "/out/$name" .
   if ($r.Code -ne 0 -or -not (Test-Path $Target)) { Fail "Sicherung fehlgeschlagen:`n$($r.Out)" }
   Say "Sicherung geschrieben: $Target" 'Green'
-  if ($wasRunning) { Start-Clawbook }
+  if ($wasRunning -and -not $NoRestart) { Start-Clawbook }
   return $Target
 }
 
@@ -288,7 +289,7 @@ function Import-Home($Source) {
   $s = Get-State
   if ($s.Volume) {
     Say 'Sichere zuerst das vorhandene Home, damit nichts verloren geht ...' 'Cyan'
-    $null = Export-Home ''
+    $null = Export-Home '' -NoRestart
   }
   Stop-Clawbook
   Remove-ClawbookContainer
@@ -324,7 +325,7 @@ function Reset-Clawbook {
   $a = Read-Host 'Wirklich zuruecksetzen? Zum Bestaetigen "ja" eingeben'
   if ($a -ne 'ja') { Say 'Abgebrochen.'; return }
   $s = Get-State
-  if ($s.Volume) { $null = Export-Home '' }
+  if ($s.Volume) { $null = Export-Home '' -NoRestart }
   Stop-Clawbook
   Remove-ClawbookContainer
   if ($s.Volume) { $null = Invoke-Wslc volume rm $Volume }

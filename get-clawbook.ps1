@@ -6,6 +6,10 @@
 # Downloads the current management script to %LOCALAPPDATA%\clawbook and
 # starts it. Everything else is decided in its menu. Running the command
 # again always fetches the newest version.
+#
+# Optional, for tests and power users (set before running the command):
+#   $env:CLAWBOOK_ACTION = 'status'   # start|update|export|import|ssh|status|stop|reset
+#   $env:CLAWBOOK_IMAGE  = 'ghcr.io/schlingensiepen/clawbook-lehre:v0.4.0-rc.1'
 
 & {
   $ErrorActionPreference = 'Stop'
@@ -24,5 +28,8 @@
   # Process-scoped bypass: works without administrator rights and does not
   # change the machine's execution policy.
   $shell = (Get-Process -Id $PID).Path
-  & $shell -NoProfile -ExecutionPolicy Bypass -File $target
+  $params = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $target)
+  if ($env:CLAWBOOK_ACTION) { $params += @('-Action', $env:CLAWBOOK_ACTION) }
+  if ($env:CLAWBOOK_IMAGE) { $params += @('-Image', $env:CLAWBOOK_IMAGE) }
+  & $shell @params
 }
