@@ -137,6 +137,17 @@ RUN test -n "${GRAPHIFY_VERSION}" -a -n "${NOTEBOOKLM_VERSION}" \
  && chmod -R a+rX /opt/uv-tools \
  && uv cache clean
 
+# WorkspaceManager from the vendored wheel, checksum pinned in versions.env
+ARG WSM_VERSION
+ARG WSM_SHA256
+COPY vendor/wsm/ /tmp/wsm/
+RUN test -n "${WSM_VERSION}" -a -n "${WSM_SHA256}" \
+ && echo "${WSM_SHA256}  /tmp/wsm/wsm-${WSM_VERSION}-py3-none-any.whl" | sha256sum -c - \
+ && uv tool install "/tmp/wsm/wsm-${WSM_VERSION}-py3-none-any.whl" \
+ && chmod -R a+rX /opt/uv-tools \
+ && rm -rf /tmp/wsm \
+ && uv cache clean
+
 # --- Image defaults ----------------------------------------------------------
 COPY deploy/rootfs/ /
 

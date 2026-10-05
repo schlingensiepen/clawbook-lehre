@@ -1,3 +1,4 @@
 # Allowlist: only what the image needs goes into the build context.
 *
 !deploy/rootfs
+!vendor/wsm/*.whl

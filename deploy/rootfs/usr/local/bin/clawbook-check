@@ -48,6 +48,7 @@ check playwright-mcp bash -c 'npm ls -g --depth=0 @playwright/mcp | grep -o "@pl
 check wikijs-mcp   bash -c 'npm ls -g --depth=0 @cahaseler/wikijs-mcp | grep -o "@cahaseler/wikijs-mcp@.*"'
 check graphify     bash -c 'uv tool list | grep "^graphifyy"'
 check notebooklm   notebooklm --version
+check wsm          bash -c 'uv tool list | grep "^wsm "'
 check cookie-fix   bash -c 'command -v notebooklm-fix-cookies'
 check chromium-pw  bash -c 'ls -d /opt/ms-playwright/chromium* | head -n 1'
 check chromium     chromium --version
