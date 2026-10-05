@@ -129,9 +129,13 @@ Auf Hochschul-Rechnern kann einiges gesperrt sein: der
 Zugriff auf GitHub oder `ghcr.io` (Proxy, Firewall), das
 Ausführen von PowerShell-Skripten, oder der Virenschutz
 meldet den Befehl aus Abschnitt 2. Das kannst du nicht
-selbst lösen. Notiere die Meldung (Foto oder kopierter
-Text) und wende dich an die Betreuung deiner
-Lehrveranstaltung; sie klärt es mit der IT.
+selbst lösen. Erfasse das Problem genau: An welchem
+Schritt, mit welcher Meldung (Foto oder kopierter Text),
+dazu das Protokoll des Skripts. Bist du sicher, dass es
+an der Installation oder Einrichtung des Rechners liegt,
+geh damit direkt zur **IT deiner Hochschule** — nur sie
+kann es dort beheben. Bei allem anderen hilft die
+Betreuung deiner Lehrveranstaltung.
 
 ## 2. Der eine Befehl
 
