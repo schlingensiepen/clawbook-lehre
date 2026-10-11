@@ -416,7 +416,9 @@ function Show-Connect {
   Say '================================================================' 'Green'
   Say ' 1. Terminal: Öffne ein neues PowerShell-Fenster und gib ein:'
   Say '       ssh clawbook'
-  Say ' 2. VS Code: Remote-SSH → clawbook → Ordner /home/student/source'
+  Say ' 2. VS Code: Befehl erneut ausführen, Menüpunkt [9] (richtet beim'
+  Say '    ersten Mal ein eigenes VS Code ein), oder im eigenen VS Code:'
+  Say '    Remote-SSH → clawbook → Ordner /home/student/source'
   Say '    (dort liegt anfangs das Beispielprojekt Sample/primer)'
   Say " 3. Remotedesktop: mstsc /v:localhost:$RdpPort"
   Say '    Ohne Passwort. Fragt Windows nach dem Zertifikat: „Ja“ wählen.'
@@ -1259,7 +1261,11 @@ function Show-Menu {
         '7' { Stop-Clawbook; Say 'Angehalten.'; return }
         '8' { Reset-Clawbook; return }
         '9' { Start-VsCodePack; return }
-        '10' { Install-VsCodePack; return }
+        '10' {
+          Install-VsCodePack
+          if (Read-YesNo 'VS Code jetzt starten und mit clawbook verbinden? [J/n]' $true) { Start-VsCodePack }
+          return
+        }
         '0' { return }
         default { Say 'Bitte eine Zahl aus dem Menü eingeben.' 'Yellow' }
       }
