@@ -1,0 +1,719 @@
+#!/usr/bin/python3 -I
+"""clawbook - manage the clawbook-lehre container from the inside.
+
+Without arguments an interactive menu starts. Every subcommand accepts
+--json: then stdout carries nothing but JSON (for the Windows script) and
+the exit code tells success (0) or failure (non-zero).
+
+    clawbook                        interactive menu
+    clawbook status [--json]        interface version, build, services, home
+    clawbook check [--quiet|--json] are all tools of the image present?
+    clawbook key show [--private]   public key and fingerprint (or private key)
+    clawbook key new [--yes]        new key pair, replaces the old one
+    clawbook stand [--write]        derived state (packages, course, VS Code)
+    clawbook kurs vscode <id>       course description (vscode.json)
+    clawbook pakete ...             packages and courses (later version)
+
+Only the Python standard library is used. User-facing output is German.
+The script works for the user "student" and for root (docker exec / wslc
+exec run as root): files in the home directory always belong to "student".
+"""
+
+import concurrent.futures
+import datetime
+import json
+import os
+import pwd
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+# Version of the command line interface the Windows script talks to.
+# Raise it when JSON fields change incompatibly or commands disappear.
+SCHNITTSTELLE = 1
+
+USER_NAME = "student"
+BUILD_FILE = "/etc/clawbook-build"
+KURSE_DIR = "/usr/share/clawbook/kurse"
+VSCODE_LISTS_DIR = "/usr/share/clawbook/vscode-extensions.d"
+SERVICES = ("sshd", "weston", "smbd")
+COURSE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+DEFAULT_COURSE = "clawbook"
+
+# Tools checked by "clawbook check": (name, command). Same checks and order
+# as the former shell script clawbook-check.
+TOOLS = [
+    ("git", ["git", "--version"]),
+    ("gh", ["gh", "--version"]),
+    ("node", ["node", "--version"]),
+    ("npm", ["npm", "--version"]),
+    ("python", ["python", "--version"]),
+    ("uv", ["uv", "--version"]),
+    ("tmux", ["tmux", "-V"]),
+    ("sshd", ["bash", "-c", "test -x /usr/sbin/sshd && echo present"]),
+    ("claude", ["claude", "--version"]),
+    ("codex", ["codex", "--version"]),
+    ("copilot", ["copilot", "--version"]),
+    ("opencode", ["opencode", "--version"]),
+    ("agy", ["agy", "--version"]),
+    ("playwright", ["playwright", "--version"]),
+    ("playwright-cli", ["bash", "-c", "command -v playwright-cli"]),
+    ("playwright-mcp", ["bash", "-c",
+                        'npm ls -g --depth=0 @playwright/mcp | grep -o "@playwright/mcp@.*"']),
+    ("wikijs-mcp", ["bash", "-c",
+                    'npm ls -g --depth=0 @cahaseler/wikijs-mcp | grep -o "@cahaseler/wikijs-mcp@.*"']),
+    ("graphify", ["bash", "-c", 'uv tool list | grep "^graphifyy"']),
+    ("notebooklm", ["notebooklm", "--version"]),
+    ("wsm", ["bash", "-c", 'uv tool list | grep "^wsm "']),
+    ("cookie-fix", ["bash", "-c", "command -v notebooklm-fix-cookies"]),
+    ("chromium-pw", ["bash", "-c", "ls -d /opt/ms-playwright/chromium* | head -n 1"]),
+    ("chromium", ["chromium", "--version"]),
+    ("weston", ["weston", "--version"]),
+    ("samba", ["dpkg-query", "-W", "-f=samba ${Version}", "samba"]),
+    ("s6-overlay", ["bash", "-c", "test -x /init && echo present"]),
+]
+
+HELP = """\
+clawbook - dein Arbeitsrechner im Container
+
+Aufruf:
+  clawbook                         Menü (interaktiv)
+  clawbook status [--json]         Schnittstelle, Build, Dienste, Home-Volume
+  clawbook check [--quiet|--json]  prüft, ob alle Werkzeuge da sind
+  clawbook key show [--private] [--json]
+                                   öffentlicher Schlüssel und Fingerabdruck;
+                                   mit --private der private Schlüssel
+  clawbook key new [--yes] [--json]
+                                   neues Schlüsselpaar (fragt vorher nach)
+  clawbook stand [--write] [--json]
+                                   zeigt den Stand (Pakete, Kurs, VS Code);
+                                   --write speichert ~/.clawbook/stand.json
+  clawbook kurs vscode <kennung> [--json]
+                                   Kursbeschreibung für VS Code
+  clawbook pakete ...              Pakete und Kurse (kommt später)
+  clawbook --version | --help
+
+Mit --json gibt clawbook nur JSON aus (für das Windows-Skript).
+"""
+
+
+class CliError(Exception):
+    """Error shown to the user; exit code attached."""
+
+    def __init__(self, message, code=1):
+        super().__init__(message)
+        self.code = code
+
+
+# --- helpers ---------------------------------------------------------------
+
+def user_info():
+    try:
+        return pwd.getpwnam(USER_NAME)
+    except KeyError:
+        raise CliError(f"Den Benutzer {USER_NAME} gibt es hier nicht.")
+
+
+def user_home():
+    return user_info().pw_dir
+
+
+def state_dir():
+    return os.path.join(user_home(), ".clawbook")
+
+
+def key_path():
+    return os.path.join(user_home(), ".ssh", "id_ed25519")
+
+
+def run(cmd, timeout=60, stdin=subprocess.DEVNULL):
+    """Runs a command; returns (exit code, stdout+stderr as text)."""
+    try:
+        p = subprocess.run(cmd, stdin=stdin, stdout=subprocess.PIPE,
+                           stderr=subprocess.STDOUT, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 127, str(e)
+    return p.returncode, p.stdout.decode("utf-8", "replace")
+
+
+def read_build():
+    """Contents of /etc/clawbook-build as dict (commit, built, ...)."""
+    data = {}
+    try:
+        with open(BUILD_FILE, encoding="utf-8") as f:
+            for line in f:
+                if "=" in line:
+                    k, v = line.rstrip("\n").split("=", 1)
+                    data[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return data
+
+
+def image_version(build):
+    """Image version if the image knows it (build stamp or environment)."""
+    return build.get("version") or os.environ.get("CLAWBOOK_VERSION") or None
+
+
+def chown_to_user(path):
+    """When running as root, hand the path over to the working user."""
+    if os.geteuid() == 0:
+        u = user_info()
+        os.chown(path, u.pw_uid, u.pw_gid)
+
+
+def write_user_file(path, text, mode=0o644):
+    """Writes a file in the user's home atomically, owned by the user.
+
+    Falls back to sudo when the directory is not writable for the caller
+    (e.g. ~/.clawbook created by root in the start script)."""
+    directory = os.path.dirname(path)
+    if not os.path.isdir(directory):
+        if os.access(os.path.dirname(directory), os.W_OK):
+            os.makedirs(directory, exist_ok=True)
+            chown_to_user(directory)
+        else:
+            rc, out = run(["sudo", "-n", "install", "-d", "-o", USER_NAME,
+                           "-g", USER_NAME, directory])
+            if rc != 0:
+                raise CliError(f"Kann {directory} nicht anlegen: {out.strip()}")
+    if os.access(directory, os.W_OK):
+        fd, tmp = tempfile.mkstemp(dir=directory, prefix=".tmp-")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(text)
+            os.chmod(tmp, mode)
+            chown_to_user(tmp)
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+        return
+    fd, tmp = tempfile.mkstemp(prefix="clawbook-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        rc, out = run(["sudo", "-n", "install", "-o", USER_NAME, "-g", USER_NAME,
+                       "-m", f"{mode:o}", tmp, path])
+        if rc != 0:
+            raise CliError(f"Kann {path} nicht schreiben: {out.strip()}")
+    finally:
+        os.unlink(tmp)
+
+
+def dump_json(data):
+    # ASCII only: the Windows script (PowerShell 5.1) reads it safely in
+    # any code page; umlauts arrive as \\u escapes.
+    return json.dumps(data, indent=2, ensure_ascii=True) + "\n"
+
+
+def ask_yes(question):
+    try:
+        answer = input(f"{question} [j/N] ").strip().lower()
+    except EOFError:
+        return False
+    return answer in ("j", "ja", "y", "yes")
+
+
+def human_bytes(n):
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
+        n /= 1024
+    return f"{n} B"
+
+
+# --- status ----------------------------------------------------------------
+
+def service_running(name):
+    rc, _ = run(["pgrep", "-x", name], timeout=10)
+    return rc == 0
+
+
+def home_is_mount(path):
+    """True when the home directory is a mount point of its own (volume)."""
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as f:
+            for line in f:
+                fields = line.split()
+                if len(fields) > 4 and fields[4] == path:
+                    return True
+    except OSError:
+        pass
+    return os.path.ismount(path)
+
+
+def collect_status():
+    build = read_build()
+    home = user_home()
+    usage = shutil.disk_usage(home)
+    return {
+        "schnittstelle": SCHNITTSTELLE,
+        "build": {"commit": build.get("commit"), "erstellt": build.get("built")},
+        "image": image_version(build),
+        "benutzer": USER_NAME,
+        "aufgerufen_als": pwd.getpwuid(os.geteuid()).pw_name,
+        "dienste": {name: service_running(name) for name in SERVICES},
+        "home": {
+            "pfad": home,
+            "eigenes_volume": home_is_mount(home),
+            "gesamt_bytes": usage.total,
+            "belegt_bytes": usage.used,
+            "frei_bytes": usage.free,
+        },
+    }
+
+
+def cmd_status(opts):
+    s = collect_status()
+    if opts["json"]:
+        sys.stdout.write(dump_json(s))
+        return 0
+    h = s["home"]
+    print("clawbook - Status")
+    print(f"  Schnittstelle:  {s['schnittstelle']}")
+    print(f"  Build:          {s['build']['commit'] or 'unbekannt'}"
+          f"  ({s['build']['erstellt'] or 'Datum unbekannt'})")
+    print(f"  Image-Version:  {s['image'] or 'unbekannt'}")
+    print(f"  Benutzer:       {s['benutzer']} (aufgerufen als {s['aufgerufen_als']})")
+    for name, ok in s["dienste"].items():
+        print(f"  Dienst {name + ':':8} {'läuft' if ok else 'läuft NICHT'}")
+    vol = "eigenes Volume" if h["eigenes_volume"] else "kein eigenes Volume"
+    print(f"  Home:           {h['pfad']} ({vol})")
+    print(f"                  belegt {human_bytes(h['belegt_bytes'])} von "
+          f"{human_bytes(h['gesamt_bytes'])}, frei {human_bytes(h['frei_bytes'])}")
+    return 0
+
+
+# --- check -----------------------------------------------------------------
+
+def check_tool(cmd):
+    """(ok, first output line) - ok when the command succeeds with output."""
+    rc, out = run(cmd, timeout=120)
+    first = out.splitlines()[0].strip() if out.strip() else ""
+    return rc == 0 and first != "", first
+
+
+def collect_checks():
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda t: check_tool(t[1]), TOOLS))
+    return [{"name": name, "version": first if ok else None, "ok": ok,
+             "befehl": " ".join(cmd)}
+            for (name, cmd), (ok, first) in zip(TOOLS, results)]
+
+
+def cmd_check(opts):
+    checks = collect_checks()
+    failed = any(not c["ok"] for c in checks)
+    if opts["json"]:
+        sys.stdout.write(dump_json([{"name": c["name"], "version": c["version"],
+                                     "ok": c["ok"]} for c in checks]))
+        return 1 if failed else 0
+    if not opts["quiet"]:
+        print("clawbook-lehre - Werkzeuge")
+        try:
+            with open(BUILD_FILE, encoding="utf-8") as f:
+                for line in f:
+                    print("  " + line.rstrip("\n"))
+        except OSError:
+            pass
+    for c in checks:
+        if c["ok"]:
+            if not opts["quiet"]:
+                print(f"  {c['name']:<16} {c['version']}")
+        else:
+            print(f"  {c['name']:<16} FEHLT ({c['befehl']})")
+    return 1 if failed else 0
+
+
+# --- key -------------------------------------------------------------------
+
+def key_info():
+    key = key_path()
+    if not os.path.isfile(key + ".pub"):
+        raise CliError(f"Es gibt noch keinen Schlüssel ({key}). Er entsteht beim "
+                       "Start des Containers oder mit: clawbook key new")
+    with open(key + ".pub", encoding="utf-8") as f:
+        public = f.read().strip()
+    rc, out = run(["ssh-keygen", "-lf", key + ".pub"])
+    fingerprint = out.strip() if rc == 0 else None
+    return {"datei": key, "oeffentlich": public, "fingerabdruck": fingerprint}
+
+
+def read_private_key():
+    key = key_path()
+    try:
+        with open(key, encoding="utf-8") as f:
+            return f.read()
+    except PermissionError:
+        rc, out = run(["sudo", "-n", "cat", key])
+        if rc != 0:
+            raise CliError(f"Kann {key} nicht lesen.")
+        return out
+    except OSError:
+        raise CliError(f"Es gibt keinen privaten Schlüssel {key}.")
+
+
+def cmd_key_show(opts):
+    info = key_info()
+    if opts["private"]:
+        private = read_private_key()
+        if opts["json"]:
+            sys.stdout.write(dump_json({"datei": info["datei"], "privat": private,
+                                        "fingerabdruck": info["fingerabdruck"]}))
+        else:
+            sys.stdout.write(private)
+        return 0
+    if opts["json"]:
+        sys.stdout.write(dump_json(info))
+        return 0
+    print(f"Öffentlicher Schlüssel ({info['datei']}.pub):")
+    print(f"  {info['oeffentlich']}")
+    print(f"Fingerabdruck: {info['fingerabdruck'] or 'unbekannt'}")
+    print("Den privaten Schlüssel zeigt: clawbook key show --private")
+    return 0
+
+
+def replace_authorized_key(old_public, new_public):
+    """Removes the old public key from authorized_keys, adds the new one."""
+    ssh_dir = os.path.dirname(key_path())
+    auth = os.path.join(ssh_dir, "authorized_keys")
+    lines = []
+    if os.path.isfile(auth):
+        with open(auth, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    old_blob = old_public.split()[1] if old_public and len(old_public.split()) > 1 else None
+    kept = [ln for ln in lines
+            if not (old_blob and len(ln.split()) > 1 and old_blob in ln.split())]
+    if new_public not in kept:
+        kept.append(new_public)
+    write_user_file(auth, "\n".join(kept) + "\n", mode=0o600)
+
+
+def cmd_key_new(opts):
+    key = key_path()
+    if not opts["yes"]:
+        if opts["json"] or not sys.stdin.isatty():
+            raise CliError("Ein neues Schlüsselpaar braucht eine Bestätigung: "
+                           "clawbook key new --yes", code=2)
+        print("Ein neues Schlüsselpaar ersetzt das alte. Mit dem alten privaten")
+        print("Schlüssel kommst du danach nicht mehr per SSH herein; den neuen")
+        print("musst du unter Windows hinterlegen (z. B. über das Windows-Skript).")
+        if not ask_yes("Neues Schlüsselpaar erzeugen?"):
+            print("Abgebrochen, der alte Schlüssel bleibt.")
+            return 1
+    old_public = None
+    if os.path.isfile(key + ".pub"):
+        with open(key + ".pub", encoding="utf-8") as f:
+            old_public = f.read().strip()
+    ssh_dir = os.path.dirname(key)
+    if not os.path.isdir(ssh_dir):
+        os.makedirs(ssh_dir, mode=0o700)
+        chown_to_user(ssh_dir)
+    tmpdir = tempfile.mkdtemp(dir=ssh_dir, prefix=".newkey-")
+    try:
+        tmpkey = os.path.join(tmpdir, "id_ed25519")
+        rc, out = run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "",
+                       "-C", f"{USER_NAME}@clawbook", "-f", tmpkey])
+        if rc != 0:
+            raise CliError(f"ssh-keygen ist fehlgeschlagen: {out.strip()}")
+        for suffix in ("", ".pub"):
+            chown_to_user(tmpkey + suffix)
+            os.replace(tmpkey + suffix, key + suffix)
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    with open(key + ".pub", encoding="utf-8") as f:
+        new_public = f.read().strip()
+    replace_authorized_key(old_public, new_public)
+    info = key_info()
+    if opts["json"]:
+        sys.stdout.write(dump_json(dict(info, neu=True)))
+        return 0
+    print("Neues Schlüsselpaar erzeugt; authorized_keys ist angepasst.")
+    print(f"Fingerabdruck: {info['fingerabdruck'] or 'unbekannt'}")
+    print("Den privaten Schlüssel für Windows zeigt: clawbook key show --private")
+    return 0
+
+
+# --- stand -----------------------------------------------------------------
+
+def installed_packages():
+    """Installed clawbook-* and kurs-* packages from dpkg."""
+    fmt = "${Package}\t${Version}\t${db:Status-Abbrev}\t${X-Clawbook-Art}\n"
+    _, out = run(["dpkg-query", "-W", "-f=" + fmt, "clawbook-*", "kurs-*"])
+    # dpkg-query exits 1 when a pattern matches nothing; the output still counts.
+    packages = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3 or not parts[2].startswith("ii"):
+            continue
+        art = parts[3].strip() if len(parts) > 3 else ""
+        if not art:
+            art = "kurs" if parts[0].startswith("kurs-") else "technik"
+        packages.append({"name": parts[0], "version": parts[1], "art": art})
+    return sorted(packages, key=lambda p: p["name"])
+
+
+def course_id():
+    path = os.path.join(state_dir(), "kurs")
+    try:
+        with open(path, encoding="utf-8") as f:
+            value = f.read().strip()
+    except OSError:
+        return DEFAULT_COURSE
+    return value if COURSE_ID_RE.match(value) else DEFAULT_COURSE
+
+
+def vscode_extensions():
+    """Container extensions from /usr/share/clawbook/vscode-extensions.d/*.list."""
+    result = []
+    try:
+        names = sorted(n for n in os.listdir(VSCODE_LISTS_DIR) if n.endswith(".list"))
+    except OSError:
+        return result
+    for name in names:
+        try:
+            with open(os.path.join(VSCODE_LISTS_DIR, name), encoding="utf-8") as f:
+                for line in f:
+                    ext = line.split("#", 1)[0].strip()
+                    if ext and ext not in result:
+                        result.append(ext)
+        except OSError:
+            continue
+    return result
+
+
+def collect_stand():
+    build = read_build()
+    return {
+        "format": 1,
+        "schnittstelle": SCHNITTSTELLE,
+        "datum": datetime.datetime.now(datetime.timezone.utc)
+                         .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "build": {"commit": build.get("commit"), "erstellt": build.get("built")},
+        "image": image_version(build),
+        "kennung": course_id(),
+        "pakete": installed_packages(),
+        "vscode": {"container": {"erweiterungen": vscode_extensions()}},
+    }
+
+
+def stand_path():
+    return os.path.join(state_dir(), "stand.json")
+
+
+def cmd_stand(opts):
+    s = collect_stand()
+    if opts["write"]:
+        write_user_file(stand_path(), dump_json(s))
+    if opts["json"]:
+        sys.stdout.write(dump_json(s))
+        return 0
+    print("clawbook - Stand")
+    print(f"  Datum:          {s['datum']}")
+    print(f"  Build:          {s['build']['commit'] or 'unbekannt'}")
+    print(f"  Image-Version:  {s['image'] or 'unbekannt'}")
+    print(f"  Kurs-Kennung:   {s['kennung']}")
+    if s["pakete"]:
+        print("  Pakete:")
+        for p in s["pakete"]:
+            print(f"    {p['name']:<24} {p['version']}  ({p['art']})")
+    else:
+        print("  Pakete:         keine")
+    exts = s["vscode"]["container"]["erweiterungen"]
+    print(f"  VS Code im Container: {', '.join(exts) if exts else 'keine Erweiterungen'}")
+    if opts["write"]:
+        print(f"Gespeichert in {stand_path()}")
+    return 0
+
+
+# --- kurs ------------------------------------------------------------------
+
+def cmd_kurs(opts, args):
+    if len(args) != 2 or args[0] != "vscode":
+        raise CliError("Aufruf: clawbook kurs vscode <kennung> [--json]", code=2)
+    kennung = args[1]
+    if not COURSE_ID_RE.match(kennung):
+        raise CliError(f"„{kennung}“ ist keine gültige Kennung "
+                       "(Kleinbuchstaben, Ziffern, Bindestrich).", code=2)
+    path = os.path.join(KURSE_DIR, kennung, "vscode.json")
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        raise CliError(f"Für „{kennung}“ gibt es keine Kursbeschreibung ({path}).")
+    except (OSError, ValueError) as e:
+        raise CliError(f"Die Kursbeschreibung {path} ist fehlerhaft: {e}")
+    if opts["json"]:
+        sys.stdout.write(dump_json(data))
+        return 0
+    print(f"Kurs {data.get('kennung', kennung)}: {data.get('titel', '')}")
+    print(f"  Format:   {data.get('format')}")
+    print(f"  Ordner:   {data.get('ordner', '')}")
+    for link in data.get("links") or []:
+        print(f"  Link:     {link.get('titel', '')} - {link.get('url', '')}")
+    win = (data.get("windows") or {}).get("erweiterungen") or []
+    cont = (data.get("container") or {}).get("erweiterungen") or []
+    print(f"  VS Code unter Windows:   {', '.join(win) if win else 'keine'}")
+    print(f"  VS Code im Container:    {', '.join(cont) if cont else 'keine'}")
+    return 0
+
+
+# --- pakete ----------------------------------------------------------------
+
+def cmd_pakete(opts):
+    if opts["json"]:
+        sys.stdout.write(dump_json({"verfuegbar": False}))
+    else:
+        print("Technikpakete und Kurse kommen mit einer späteren Version von clawbook.")
+    return 2
+
+
+# --- interactive menu ------------------------------------------------------
+
+MENU = """
+clawbook - Menü
+  1  Status
+  2  Werkzeuge prüfen
+  3  Schlüssel anzeigen
+  4  Stand anzeigen
+  5  Stand schreiben (~/.clawbook/stand.json)
+  6  Pakete und Kurse (noch nicht verfügbar)
+  0  Beenden"""
+
+
+def plain(**kw):
+    opts = {"json": False, "quiet": False, "private": False, "yes": False, "write": False}
+    opts.update(kw)
+    return opts
+
+
+def menu_key():
+    cmd_key_show(plain())
+    print()
+    print("  p  privaten Schlüssel zeigen")
+    print("  n  neues Schlüsselpaar erzeugen")
+    print("  Enter  zurück")
+    try:
+        choice = input("Auswahl: ").strip().lower()
+    except EOFError:
+        return
+    if choice == "p":
+        cmd_key_show(plain(private=True))
+    elif choice == "n":
+        cmd_key_new(plain())
+
+
+def interactive():
+    actions = {
+        "1": lambda: cmd_status(plain()),
+        "2": lambda: cmd_check(plain()),
+        "3": menu_key,
+        "4": lambda: cmd_stand(plain()),
+        "5": lambda: cmd_stand(plain(write=True)),
+        "6": lambda: cmd_pakete(plain()),
+    }
+    while True:
+        print(MENU)
+        try:
+            choice = input("Deine Wahl: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return 0
+        if not choice:
+            continue
+        if choice in ("0", "q", "x"):
+            return 0
+        action = actions.get(choice)
+        if action is None:
+            print(f"„{choice}“ gibt es nicht; wähle eine Nummer aus der Liste.")
+            continue
+        print()
+        try:
+            action()
+        except CliError as e:
+            print(f"Fehler: {e}")
+        except KeyboardInterrupt:
+            print("\nAbgebrochen.")
+
+
+# --- command line ----------------------------------------------------------
+
+FLAGS = {"--json": "json", "--quiet": "quiet", "-q": "quiet", "--private": "private",
+         "--yes": "yes", "-y": "yes", "--write": "write"}
+
+
+def version_text():
+    commit = read_build().get("commit") or "unbekannt"
+    return f"clawbook (Schnittstelle {SCHNITTSTELLE}, Build {commit})"
+
+
+def dispatch(words, opts):
+    cmd, args = words[0], words[1:]
+    if cmd == "status" and not args:
+        return cmd_status(opts)
+    if cmd == "check" and not args:
+        return cmd_check(opts)
+    if cmd == "key":
+        if args == ["show"]:
+            return cmd_key_show(opts)
+        if args == ["new"]:
+            return cmd_key_new(opts)
+        raise CliError("Aufruf: clawbook key show [--private] | clawbook key new [--yes]",
+                       code=2)
+    if cmd == "stand" and not args:
+        return cmd_stand(opts)
+    if cmd == "kurs":
+        return cmd_kurs(opts, args)
+    if cmd == "pakete":
+        return cmd_pakete(opts)
+    raise CliError(f"Unbekannter Befehl: {' '.join(words)} (Hilfe: clawbook --help)",
+                   code=2)
+
+
+def main(argv):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, ValueError):
+        pass
+    opts = plain()
+    words = []
+    for a in argv:
+        if a in ("-h", "--help", "help"):
+            sys.stdout.write(HELP)
+            return 0
+        if a == "--version":
+            print(version_text())
+            return 0
+        if a in FLAGS:
+            opts[FLAGS[a]] = True
+        elif a.startswith("-"):
+            words = None
+            bad = a
+            break
+        else:
+            words.append(a)
+    try:
+        if words is None:
+            raise CliError(f"Unbekannte Option: {bad} (Hilfe: clawbook --help)", code=2)
+        if not words:
+            if opts["json"]:
+                raise CliError("--json braucht einen Befehl, z. B. clawbook status --json",
+                               code=2)
+            return interactive()
+        return dispatch(words, opts)
+    except CliError as e:
+        if opts["json"]:
+            sys.stdout.write(dump_json({"fehler": str(e)}))
+        else:
+            print(f"clawbook: {e}", file=sys.stderr)
+        return e.code
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

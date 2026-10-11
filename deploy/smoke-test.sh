@@ -5,7 +5,7 @@
 #
 # Starts the image with a fresh home volume and checks: healthcheck, all
 # tools (clawbook-check), build stamp, SSH login as "student" with the key
-# from the home volume, RDP port and XWayland display, Samba share
+# from the home volume, the CLI clawbook (JSON interface), RDP port and XWayland display, Samba share
 # (read/write with the shown password), and that keys survive recreating
 # the container with the same home volume.
 #
@@ -94,6 +94,44 @@ grep -q "BEGIN OPENSSH PRIVATE KEY" <<<"${logs}" \
 ssh_run 'whoami && clawbook-check --quiet && tmux -V' || fail "SSH login as student failed"
 echo "ssh ok"
 
+# CLI clawbook: JSON interface (as student via SSH and as root via exec).
+json_ok() {
+  # $1 = JSON text, $2 = Python expression over d that must be true
+  docker exec -i "${NAME}" python3 -c \
+    "import json,sys; d=json.load(sys.stdin); sys.exit(0 if ($2) else 1)" <<<"$1"
+}
+out=$(ssh_run 'clawbook status --json') || fail "clawbook status --json failed"
+json_ok "${out}" 'int(d["schnittstelle"]) >= 1 and all(d["dienste"].values())' \
+  || fail "clawbook status --json: invalid JSON, interface < 1 or a service down"
+out=$(docker exec "${NAME}" clawbook status --json) || fail "clawbook status --json as root failed"
+json_ok "${out}" 'd["benutzer"] == "student"' || fail "clawbook status --json as root: bad JSON"
+out=$(ssh_run 'clawbook check --json') || fail "clawbook check --json reported missing tools"
+json_ok "${out}" 'isinstance(d, list) and len(d) > 0 and all(t["ok"] for t in d)' \
+  || fail "clawbook check --json: invalid JSON"
+ssh_run 'rm -f ~/.clawbook/stand.json && clawbook stand --write >/dev/null' \
+  || fail "clawbook stand --write failed"
+out=$(ssh_run 'cat ~/.clawbook/stand.json') || fail "clawbook stand --write wrote no stand.json"
+json_ok "${out}" 'd["format"] == 1 and d["kennung"] == "clawbook" and d["pakete"] == []' \
+  || fail "stand.json: unexpected content"
+ssh_run "test \"\$(stat -c %U ~/.clawbook/stand.json)\" = student" \
+  || fail "stand.json does not belong to student"
+out=$(ssh_run 'clawbook kurs vscode clawbook --json') || fail "clawbook kurs vscode clawbook failed"
+json_ok "${out}" 'd["format"] == 1 and d["kennung"] == "clawbook"' \
+  || fail "clawbook kurs vscode clawbook: unexpected content"
+# The built-in course description must match windows/vscodepack/clawbook.json.
+pack_json=$(dirname "$0")/../windows/vscodepack/clawbook.json
+if [ -f "${pack_json}" ]; then
+  docker exec -i "${NAME}" python3 -c \
+    'import json,sys; a=json.load(open("/usr/share/clawbook/kurse/clawbook/vscode.json")); sys.exit(0 if a == json.load(sys.stdin) else 1)' \
+    <"${pack_json}" || fail "built-in course description differs from windows/vscodepack/clawbook.json"
+fi
+rc=0; out=$(ssh_run 'clawbook pakete --json') || rc=$?
+if [ "${rc}" != 2 ] || ! json_ok "${out}" 'd == {"verfuegbar": False}'; then
+  fail "clawbook pakete --json: expected exit 2 and {\"verfuegbar\": false}"
+fi
+ssh_run 'clawbook key show --json' >/dev/null || fail "clawbook key show --json failed"
+echo "cli ok"
+
 # Sample project in the WorkspaceManager layout, a git repo owned by student.
 ssh_run 'git -C ~/source/Sample/primer log --oneline -1 && test -f ~/source/Sample/primer/README.md' \
   || fail "sample project ~/source/Sample/primer missing"
@@ -131,5 +169,16 @@ ssh_run true || fail "SSH login failed after recreating the container"
 ssh_run 'rm -rf ~/source/Sample' && docker restart "${NAME}" >/dev/null && wait_healthy
 ssh_run 'test ! -e ~/source/Sample' || fail "sample project was recreated after deletion"
 echo "recreate ok"
+
+# clawbook key new: new key pair, the new key logs in, the old one no longer.
+cp "${WORK}/key" "${WORK}/oldkey"
+ssh_run 'clawbook key new --yes --json' >/dev/null || fail "clawbook key new --yes failed"
+docker cp "${NAME}:/home/student/.ssh/id_ed25519" "${WORK}/key" >/dev/null
+[ "$(ssh-keygen -lf "${WORK}/key")" != "${second}" ] || fail "clawbook key new kept the old key"
+ssh_run true || fail "SSH login with the new key failed"
+ssh -i "${WORK}/oldkey" -p "${SSH_PORT}" -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o LogLevel=ERROR \
+    student@127.0.0.1 true 2>/dev/null && fail "old key still logs in after clawbook key new"
+echo "key new ok"
 
 echo "Smoke test passed."

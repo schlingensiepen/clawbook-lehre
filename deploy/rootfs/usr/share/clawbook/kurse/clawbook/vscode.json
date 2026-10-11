@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "kennung": "clawbook",
+  "titel": "clawbook (ohne Kurs)",
+  "ordner": "/home/student/source",
+  "links": [
+    {
+      "titel": "clawbook-lehre",
+      "url": "https://github.com/schlingensiepen/clawbook-lehre"
+    }
+  ],
+  "windows": {
+    "erweiterungen": [
+      "ms-vscode-remote.remote-ssh"
+    ]
+  },
+  "container": {
+    "erweiterungen": []
+  },
+  "einstellungen": {
+    "update.mode": "none",
+    "telemetry.telemetryLevel": "off",
+    "redhat.telemetry.enabled": false
+  }
+}

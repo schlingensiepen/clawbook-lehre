@@ -111,7 +111,7 @@ EOF
 cat "${KEY}"
 cat <<EOF
 ----------------------------------------------------------------
- Werkzeuge prüfen: clawbook-check
+ Verwaltung:       clawbook  (Werkzeuge prüfen: clawbook check)
 ================================================================
 
 EOF
