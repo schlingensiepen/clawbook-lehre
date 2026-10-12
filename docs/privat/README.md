@@ -1,6 +1,6 @@
 # clawbook auf dem eigenen Rechner
 
-Stand: 2026-10-05
+Stand: 2026-10-12
 
 Diese Anleitungen richten sich an dich, wenn du clawbook auf
 **deinem eigenen Rechner** einrichten willst — einem Rechner,
@@ -54,7 +54,7 @@ Dieser Weg lohnt sich, wenn mindestens eins zutrifft:
 | Sicherung | Menüpunkt „mitnehmen" | `tar`-Befehl; Format ist dasselbe |
 
 Gleich bleibt alles im Container: der Benutzer `student`,
-die Werkzeuge, `clawbook-check`, das Home-Volume
+die Werkzeuge, der Befehl `clawbook`, das Home-Volume
 `clawbook-home`, SSH auf Port 2222, der Bildschirm auf
 Port 3390. Die Anleitungen zum [Setup](../setup/README.md)
 der Accounts und Werkzeuge gelten unverändert. Auch eine

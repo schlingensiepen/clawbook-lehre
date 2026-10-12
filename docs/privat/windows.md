@@ -1,6 +1,6 @@
 # Windows: clawbook dauerhaft auf dem eigenen Rechner
 
-Stand: 2026-10-05
+Stand: 2026-10-12
 
 **Nicht vom Kurs getestet.** Dieser Weg ist für deinen
 eigenen Windows-Rechner, auf dem du Administrator bist. Der
@@ -171,13 +171,19 @@ ssh clawbook
 Beim ersten Mal merkt sich SSH den Container als bekannten
 Rechner („Permanently added …"). **Ab hier bist du im
 Container**, als `student`; die Eingabeaufforderung zeigt
-`student@…:~$`. Dort:
+`student@…:~$`.
+Vorher fragt der Container beim ersten Mal nach der
+GitHub-Anmeldung (siehe [GitHub](../setup/github.md));
+danach öffnet sich das clawbook-Menü. Mit `0` kommst du
+in die Eingabezeile, mit `clawbook` jederzeit zurück ins
+Menü. Dort:
 
 ```bash
-clawbook-check
+clawbook check
 ```
 
-zeigt, ob alle Werkzeuge da sind. `exit` bringt dich
+zeigt, ob alle Werkzeuge da sind (der ältere Befehl
+`clawbook-check` tut dasselbe). `exit` bringt dich
 zurück nach Windows.
 
 ## 5. VS Code und Bildschirm

@@ -1,6 +1,6 @@
 # clawbook-lehre
 
-Stand: 2026-10-05
+Stand: 2026-10-12
 
 Ein Container-Image eines fertig eingerichteten
 Arbeitsrechners für die Arbeit mit KI-Agenten — und eine
@@ -89,7 +89,7 @@ mitarbeiten; Studierende brauchen ihn nicht.
 - `windows/clawbook.ps1` — das Verwaltungs-Skript: Menü
   und Aktionen (starten, aktualisieren, mitnehmen,
   importieren, SSH einrichten, Status, anhalten,
-  zurücksetzen) über WSLC
+  zurücksetzen) über WSLC, dazu das VSCodePack
 - `deploy/Containerfile` — Bauanleitung des Images
 - `deploy/versions.env` — festgelegte Versionen aller
   Werkzeuge; ein wöchentlicher Workflow meldet neuere
@@ -97,7 +97,8 @@ mitarbeiten; Studierende brauchen ihn nicht.
   werden: Start-Schritt (`etc/cont-init.d`), Dienste
   SSH, Bildschirm (Weston-RDP) und Samba
   (`etc/services.d`, gestartet von s6-overlay),
-  Prüfskript `clawbook-check`, Voreinstellungen
+  Befehl `clawbook` (Menü, GitHub-Anmeldung, Prüfung;
+  `clawbook-check` als kurzer Aufruf), Voreinstellungen
 - `deploy/smoke-test.sh`, `deploy/check-versions.sh` —
   Rauchtest des gebauten Images und Versions-Bericht
 - `.github/workflows/` — Bau mit Lint und Rauchtest,

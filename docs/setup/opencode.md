@@ -1,6 +1,6 @@
 # OpenCode mit verschiedenen Anbietern
 
-Stand: 2026-10-05
+Stand: 2026-10-12
 
 > Die Anbieter ändern ihre Seiten, Menüs und Angebote
 > laufend. Sieht etwas anders aus als hier beschrieben,
@@ -100,7 +100,7 @@ dem du es startest, und führt dort Befehle aus.
 Deshalb immer in einen Projektordner wechseln:
 
 ```bash
-cd ~/source/<Thema>/<Projekt>
+cd ~/source/<Bereich>/<Projekt>
 opencode
 ```
 

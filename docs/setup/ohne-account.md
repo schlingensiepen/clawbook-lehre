@@ -1,21 +1,21 @@
 # Ohne Account: Playwright, Graphify, uv, Node.js, Python, wsm
 
-Stand: 2026-10-05
+Stand: 2026-10-12
 
 > Die Anbieter ändern ihre Seiten, Menüs und Angebote
 > laufend. Sieht etwas anders aus als hier beschrieben,
-> such dir den aktuellen Weg auf der Seite des Anbieters
-> selbst.
+> suchen Sie den aktuellen Weg bitte selbst auf der
+> Seite des Anbieters.
 
 Diese Werkzeuge brauchen keinen Zugang bei einem
 Anbieter. Sie sind im Image installiert und
 funktionieren sofort. Zwei davon — Playwright und
-Graphify — musst du einmal bei Claude Code anmelden,
+Graphify — melden Sie einmal bei Claude Code an,
 damit der Agent sie benutzen kann; das dauert eine
 Minute und steht hier Schritt für Schritt.
 
 **Kosten:** keine. (Graphify nutzt für Dokumente das
-Modell deines Agenten, also dessen Kontingent.)
+Modell Ihres Agenten, also dessen Kontingent.)
 
 ## Beim Anbieter
 
@@ -37,8 +37,8 @@ belastet den Kontext des Agenten (seinen
 „Arbeitsspeicher" an Text) deutlich weniger als der
 MCP-Server, weil keine großen Werkzeugbeschreibungen
 geladen werden. Claude Code erfährt davon über einen
-**Skill** — eine kurze Anleitung, die du einmal
-installierst:
+**Skill** — eine kurze Anleitung, die Sie einmal
+installieren:
 
 ```bash
 playwright-cli install --skills
@@ -46,7 +46,7 @@ playwright-cli install --skills
 
 Danach reicht es, den Agenten zu bitten: „Öffne mit
 playwright-cli die Seite … und sag mir, was dort
-steht." Von Hand sieht das so aus:
+steht." (Den Agenten dürfen Sie duzen.) Von Hand sieht das so aus:
 
 ```bash
 playwright-cli open https://example.org
@@ -95,7 +95,7 @@ graphify install --platform antigravity
 Auch ohne Agent, im Projektordner:
 
 ```bash
-cd ~/source/<Thema>/<Projekt>
+cd ~/source/<Bereich>/<Projekt>
 graphify .                       # Graph bauen
 graphify explain "<Begriff>"     # einen Knoten erklären
 graphify path "<Begriff A>" "<Begriff B>"
@@ -112,17 +112,17 @@ node --version
 npm --version
 ```
 
-**Eigene Pakete** installierst du nicht ins System,
-sondern in dein Projekt oder dein Home-Verzeichnis.
+**Eigene Pakete** installieren Sie nicht ins System,
+sondern in Ihr Projekt oder Ihr Home-Verzeichnis.
 Grund: Das System liegt im Image und wird bei einer
-neuen Image-Version ersetzt; dein Home-Verzeichnis
+neuen Image-Version ersetzt; Ihr Home-Verzeichnis
 bleibt.
 
 Python-Projekt mit `uv` (schneller Ersatz für `pip`
 und `venv`):
 
 ```bash
-cd ~/source/<Thema>/<Projekt>
+cd ~/source/<Bereich>/<Projekt>
 uv init          # nur bei neuem Projekt: pyproject.toml anlegen
 uv add requests  # Abhängigkeit hinzufügen
 uv run python main.py
@@ -140,7 +140,7 @@ uv tool install ruff
 Node.js-Projekt:
 
 ```bash
-cd ~/source/<Thema>/<Projekt>
+cd ~/source/<Bereich>/<Projekt>
 npm init -y
 npm install <paket>
 ```
@@ -151,7 +151,7 @@ nächsten Image-Update verloren.
 
 ### WorkspaceManager wsm
 
-`wsm` verwaltet deine Projekte: Er legt sie unter
+`wsm` verwaltet Ihre Projekte: Er legt sie unter
 `~/source` an, erzeugt das Repository auf GitHub
 (über `gh`), startet Claude Code darin in einer
 tmux-Sitzung und wandelt mit `wsm update` Dokumente
@@ -160,14 +160,22 @@ Kurses, siehe [Kurs-Dienste](kurs-dienste.md)).
 
 **Zuerst [GitHub](github.md) einrichten**, dann `wsm`
 zum ersten Mal starten. Grund: Beim ersten Start liest
-`wsm` deinen GitHub-Benutzernamen aus `gh` sowie Name
+`wsm` Ihren GitHub-Benutzernamen aus `gh` sowie Name
 und E-Mail aus `git config` und schreibt sie in
-`~/.workspacemanager.yml`. Ist `gh` noch nicht
-angemeldet, fragt `wsm` einmal nach dem Benutzernamen
-und schlägt `student` vor — dann steht ein falscher
-Name in der Datei, und das Anlegen von Repositories
-auf GitHub scheitert. Passiert das doch, trägst du den
-richtigen Namen unter `locations → git → user` in die
+`~/.workspacemanager.yml`. Die GitHub-Anmeldung bietet
+Ihnen der Container schon beim ersten `ssh clawbook`
+an. Haben Sie sie übersprungen, fragt `wsm` beim
+ersten Start zuerst danach („1 Jetzt bei GitHub
+anmelden (empfohlen)" oder „2 Abbrechen"). Brechen Sie
+ab, warnt `wsm`, dass sonst „student" als GitHub-Name
+eingetragen wird, und fragt „Trotzdem mit wsm
+fortfahren? [j/N]". Enter heißt nein: `wsm` startet
+nicht, und Sie melden sich mit `clawbook github login`
+an. Mit `j` geht es weiter — dann fragt `wsm` nach dem
+Benutzernamen und trägt ohne Eingabe `student` ein,
+also einen falschen Namen, und das Anlegen von
+Repositories auf GitHub scheitert. Passiert das doch,
+tragen Sie den richtigen Namen unter `locations → git → user` in die
 Datei ein (`code ~/.workspacemanager.yml` im
 VS-Code-Terminal).
 
@@ -178,10 +186,10 @@ wsm --help     # alle Befehle
 
 Die Einstellungen liegen in `~/.workspacemanager.yml`;
 der Speicherort `~/source` ist voreingestellt. Eine
-tmux-Sitzung, die `wsm` gestartet hat, verlässt du mit
+tmux-Sitzung, die `wsm` gestartet hat, verlassen Sie mit
 `Strg+B`, dann `D` — sie läuft weiter (siehe
-[Übersicht](README.md), „Wie du ein Programm wieder
-verlässt").
+[Übersicht](README.md), „Wie Sie ein Programm wieder
+verlassen").
 
 Hinweis zur Zwischenablage: `wsm` kann unter Windows
 Dateien aus der Zwischenablage nach `raw/` übernehmen.
@@ -189,7 +197,7 @@ Im Container geht das nicht — Programme im Container
 sehen die Windows-Zwischenablage nicht. Davon
 unberührt ist das Kopieren und Einfügen von **Text im
 Terminal**, das funktioniert. Dateien für `raw/`
-legst du direkt dort ab, zum Beispiel per Ziehen in
+legen Sie direkt dort ab, zum Beispiel per Ziehen in
 den Explorer von VS Code oder über den
 Austauschordner (siehe [Installation](../installation.md),
 Abschnitt 7).
@@ -197,7 +205,7 @@ Abschnitt 7).
 ## Prüfen
 
 ```bash
-clawbook-check
+clawbook check
 ```
 
 zeigt jede Zeile mit Version — `playwright-cli`,
@@ -210,8 +218,8 @@ wsm config --validate  # Konfiguration gültig
 ```
 
 In Claude Code zeigt `/mcp` den Playwright-Server und
-`/graphify` erscheint in der Befehlsliste, wenn du
-`/` tippst.
+`/graphify` erscheint in der Befehlsliste, wenn Sie
+`/` tippen.
 
 ## Typische Fehler
 
@@ -235,24 +243,25 @@ In Claude Code zeigt `/mcp` den Playwright-Server und
   Code beenden (`/exit`) und neu starten.
 - **`graphify .` bricht bei PDFs ab oder fragt nach
   einem Schlüssel** → Für Dokumente braucht Graphify
-  ein Modell. Nutze `/graphify .` innerhalb von Claude
-  Code (dann nimmt es dessen Modell) statt `graphify .`
-  von der Kommandozeile.
+  ein Modell. Nutzen Sie `/graphify .` innerhalb von
+  Claude Code (dann nimmt es dessen Modell) statt
+  `graphify .` von der Kommandozeile.
 - **`pip install` meldet „externally-managed-environment"**
-  → Debian schützt das System-Python. Nimm `uv add`
-  im Projekt oder `uv tool install` für Werkzeuge.
+  → Debian schützt das System-Python. Nehmen Sie
+  `uv add` im Projekt oder `uv tool install` für Werkzeuge.
 - **`wsm` meldet „Konfigurationsdatei nicht
   gefunden"** → Die Datei wurde gelöscht. `wsm`
   erneut starten; es legt sie neu an. Oder
   `wsm config --init` für die Abfrage aller Werte.
 - **`wsm` kann kein Repository auf GitHub anlegen** →
-  `gh auth status` prüfen (siehe [GitHub](github.md))
-  und den Benutzernamen in `~/.workspacemanager.yml`
-  mit deinem GitHub-Namen vergleichen.
+  `clawbook github status` prüfen (siehe
+  [GitHub](github.md)) und den Benutzernamen in
+  `~/.workspacemanager.yml` mit Ihrem GitHub-Namen
+  vergleichen.
 
 ## Wenn etwas nicht geht
 
-Erst „Typische Fehler" oben, dann `clawbook-check`:
+Erst „Typische Fehler" oben, dann `clawbook check`:
 Steht dort `FEHLT`, liegt es am Image — melden. Sonst
 `claude mcp list`, `claude mcp get playwright` und
 `wsm config --validate`. Bei `wsm` hilft oft schon ein

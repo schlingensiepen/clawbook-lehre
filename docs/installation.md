@@ -1,6 +1,6 @@
 # Installation: clawbook starten und verbinden
 
-Stand: 2026-10-11
+Stand: 2026-10-12
 
 Diese Anleitung bringt clawbook auf Ihren Windows-Rechner:
 Sie führen einen Befehl aus, warten, bis der Arbeitsrechner
@@ -45,7 +45,8 @@ Sie brauchen:
   Gigabyte groß, und Ihr Home-Verzeichnis im Container
   wächst mit Ihren Projekten. Rechnen Sie mit mindestens
   20 GB freiem Platz; das VS Code aus Abschnitt 5 braucht
-  noch einmal etwa 1 GB.
+  noch einmal etwa 1 GB (Download etwa 150 MB, entpackt
+  etwa 1 GB).
 - **Internetzugang** zu GitHub, zu `ghcr.io` (dort liegt
   das Image) und zu Microsoft (dort holt das Skript
   VS Code). Für den ersten Start werden einige GB
@@ -331,10 +332,64 @@ bekannten Rechner und zeigt „Permanently added …" — das ist
 normal und kommt nicht wieder.
 
 Sie sind jetzt im Container angemeldet, als Benutzer
-`student`. Die Eingabeaufforderung wechselt von `PS C:\…>`
-zu `student@…:~$`. Alles, was Sie hier eingeben, läuft im
-Container, nicht unter Windows. Mit `exit` kommen Sie
-zurück nach PowerShell; der Container läuft weiter.
+`student`. Alles, was Sie hier eingeben, läuft im
+Container, nicht unter Windows.
+
+**Beim ersten Mal: GitHub-Anmeldung.** Gleich nach dem
+Verbinden fragt der Container, ob Sie sich bei GitHub
+anmelden wollen („GitHub-Anmeldung … Du bist in clawbook
+noch nicht bei GitHub angemeldet."), mit der Auswahl
+„1 Jetzt bei GitHub anmelden (empfohlen)" und
+„2 Abbrechen – weiter zum Menü". Haben Sie schon ein
+GitHub-Konto, drücken Sie Enter und folgen Sie den
+Schritten in [Setup: GitHub](setup/github.md) — das
+dauert wenige Minuten. Haben Sie noch keins, legen Sie
+es jetzt an: im Browser unter Windows, wie in
+[Setup: GitHub](setup/github.md#konto-anlegen)
+beschrieben, etwa fünf Minuten. Lassen Sie das
+PowerShell-Fenster mit der Frage so lange offen und
+drücken Sie danach Enter. Den Studierenden-Antrag
+(Student Developer Pack) brauchen Sie für die Anmeldung
+nicht; er kann später folgen. Die Anmeldung kommt
+zuerst, weil `git` und der WorkspaceManager `wsm`
+(Abschnitt 8) sie brauchen. Wählen Sie doch `2`, kommt
+die Frage beim nächsten `ssh clawbook` wieder.
+
+**Danach: das clawbook-Menü.** Es öffnet sich einmal pro
+Anmeldung und sieht etwa so aus:
+
+```text
+clawbook - Menü
+  GitHub: angemeldet als <ihr-name>
+  1  Status
+  2  Werkzeuge prüfen
+  3  Schlüssel anzeigen
+  4  Stand anzeigen
+  5  Stand schreiben (~/.clawbook/stand.json)
+  6  Pakete und Kurse (noch nicht verfügbar)
+  7  GitHub-Anmeldung prüfen
+  8  Menü beim Anmelden per SSH nicht mehr zeigen
+  0  Beenden
+Deine Wahl:
+```
+
+Mit `0` und Enter schließen Sie das Menü und landen in
+der normalen Eingabezeile: Sie wechselt von `PS C:\…>`
+zu `student@…:~$`. Mit dem Befehl `clawbook` holen Sie
+das Menü jederzeit zurück; darauf weist auch die Meldung
+„Das clawbook-Menü öffnest du jederzeit wieder mit:
+clawbook" hin. Was die Menüpunkte tun, steht in
+Abschnitt 8.
+
+Wollen Sie das Menü beim Verbinden nicht mehr sehen,
+wählen Sie **8 „Menü beim Anmelden per SSH nicht mehr
+zeigen"**; mit demselben Punkt (dann „… wieder zeigen")
+schalten Sie es wieder ein. Im Terminal von VS Code, in
+tmux-Fenstern und bei einzelnen Befehlen wie
+`ssh clawbook <befehl>` öffnet sich das Menü nie.
+
+Mit `exit` kommen Sie zurück nach PowerShell; der
+Container läuft weiter.
 
 Für die tägliche Arbeit brauchen Sie dieses Terminal nicht
 unbedingt: VS Code (Abschnitt 5) bringt ein eigenes
@@ -430,7 +485,7 @@ PowerShell-Fenster so lange offen.
    darauf und wählen Sie „Vertrauen (Trust)".
 6. Links im Explorer sehen Sie das Beispielprojekt
    `samples/primer` — hier entstehen Ihre Projekte, nach
-   dem Schema `~/source/<Thema>/<Projekt>` (Abschnitt 8).
+   dem Schema `~/source/<Bereich>/<Projekt>` (Abschnitt 8).
 7. Terminal im Container: Menü „Terminal → Neues Terminal
    (New Terminal)". Es läuft im Container als `student`,
    genau wie `ssh clawbook`.
@@ -583,32 +638,54 @@ bekommen Änderungen von der Windows-Seite nicht mit.
 
 ## 8. Erste Schritte im Container
 
-Verbinden Sie sich mit `ssh clawbook` oder im
-VS-Code-Terminal und prüfen Sie, ob alle Werkzeuge da
-sind:
+Im Container hilft Ihnen der Befehl `clawbook`. Ohne
+Zusatz öffnet er das Menü aus Abschnitt 4 (bei
+`ssh clawbook` kommt es von selbst):
+
+- **1 Status** — Build des Images, laufende Dienste und
+  wie voll Ihr Home-Verzeichnis ist.
+- **2 Werkzeuge prüfen** — eine Tabelle mit allen
+  Werkzeugen und ihren Versionen.
+- **3 Schlüssel anzeigen** — der SSH-Schlüssel des
+  Containers; von dort aus auch ein neues Schlüsselpaar
+  (dann neu bei GitHub hinterlegen, siehe
+  [Setup: GitHub](setup/github.md)).
+- **4 Stand anzeigen** und **5 Stand schreiben** — was
+  im Container installiert ist; das Verwaltungs-Skript
+  speichert diesen Stand beim Sichern selbst (siehe
+  [Pflege](pflege.md)).
+- **6 Pakete und Kurse** — kommt mit einer späteren
+  Version.
+- **7 GitHub anmelden** bzw. **GitHub-Anmeldung
+  prüfen** — je nachdem, ob Sie schon angemeldet sind.
+- **8** — das Menü beim Anmelden per SSH ab- oder
+  wieder einschalten.
+
+Prüfen Sie zuerst, ob alle Werkzeuge da sind: Menüpunkt
+2 oder direkt
 
 ```bash
-clawbook-check
+clawbook check
 ```
 
-Die Ausgabe ist eine Tabelle mit allen Werkzeugen und
-ihren Versionen. Steht irgendwo `FEHLT`, stimmt etwas mit
+Steht in der Tabelle irgendwo `FEHLT`, stimmt etwas mit
 dem Image nicht — melden Sie es bei der Betreuung Ihrer
-Lehrveranstaltung.
+Lehrveranstaltung. Der ältere Befehl `clawbook-check`
+funktioniert weiterhin und tut dasselbe. `clawbook --help`
+zeigt alle Befehle.
 
-Dieselbe Prüfung erreichen Sie auch über den Befehl
-`clawbook`: Ohne Parameter zeigt er ein kleines Menü
-(Status, Werkzeuge prüfen, Schlüssel anzeigen, Stand
-anzeigen). `clawbook-check` funktioniert weiterhin und ist
-eine Abkürzung für `clawbook check`.
-
-Ihre Projekte liegen unter `~/source`, sortiert nach
-Thema: `~/source/<Thema>/<Projekt>`, jedes Projekt ein
-eigenes Git-Repository. Ein erstes Beispiel ist schon da:
-`~/source/samples/primer` — dort können Sie gefahrlos
-ausprobieren. Neue Projekte legt der WorkspaceManager mit
-dem Befehl `wsm` in genau dieser Struktur an und startet
-Agenten darin; `wsm --help` zeigt seine Möglichkeiten.
+Ihre Projekte liegen unter `~/source`, geordnet nach
+Bereichen: `~/source/<Bereich>/<Projekt>`, jedes Projekt
+ein eigenes Git-Repository. Ein erstes Beispiel ist schon
+da: `~/source/samples/primer` im Bereich `samples` — dort
+können Sie gefahrlos ausprobieren. Der WorkspaceManager
+legt neue Projekte mit dem Befehl `wsm` in dieser
+Struktur an und startet Agenten darin; `wsm --help`
+zeigt seine Möglichkeiten. Melden Sie sich vor dem
+ersten `wsm` bei GitHub an (Abschnitt 4): `wsm`
+übernimmt dabei Ihren GitHub-Namen. Sind Sie noch
+nicht angemeldet, fragt `wsm` beim ersten Start zuerst
+danach.
 
 Die KI-Werkzeuge sind installiert, aber noch nicht
 angemeldet — die Zugänge gehören Ihnen und kommen nicht

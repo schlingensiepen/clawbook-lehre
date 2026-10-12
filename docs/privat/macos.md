@@ -1,6 +1,6 @@
 # macOS: clawbook auf dem eigenen Mac
 
-Stand: 2026-10-05
+Stand: 2026-10-12
 
 **Nicht vom Kurs getestet.** Das Image ist für Windows mit
 WSLC gebaut und wird dort geprüft. Auf dem Mac läuft es in
@@ -236,13 +236,19 @@ Host clawbook
 
 Prüfen mit `ssh clawbook` — beim ersten Mal „Permanently
 added …". **Ab hier bist du im Container**, als `student`;
-die Eingabeaufforderung zeigt `student@…:~$`. Dort:
+die Eingabeaufforderung zeigt `student@…:~$`.
+Vorher fragt der Container beim ersten Mal nach der
+GitHub-Anmeldung (siehe [GitHub](../setup/github.md));
+danach öffnet sich das clawbook-Menü. Mit `0` kommst du
+in die Eingabezeile, mit `clawbook` jederzeit zurück ins
+Menü. Dort:
 
 ```bash
-clawbook-check
+clawbook check
 ```
 
-zeigt, ob alle Werkzeuge da sind. `exit` bringt dich
+zeigt, ob alle Werkzeuge da sind (der ältere Befehl
+`clawbook-check` tut dasselbe). `exit` bringt dich
 zurück auf den Mac.
 
 ## 5. VS Code und Bildschirm
