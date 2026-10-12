@@ -516,6 +516,11 @@ Mal reichen Schritt 3 und „Datei → Zuletzt verwendet
 öffnen (Open Recent)". Denken Sie daran, den Container
 vorher zu starten (Befehl aus Abschnitt 2, Enter).
 
+Sieht Ihr Kurs weitere Erweiterungen vor (zum Beispiel
+für Java), nennt sie die Anleitung Ihres Kurses. Mit dem
+VSCodePack kommen sie automatisch; auf diesem Ausweichweg
+installieren Sie sie selbst.
+
 ## 6. Den Bildschirm des Containers sehen
 
 Der Container hat einen eigenen grafischen Bildschirm. Sie
