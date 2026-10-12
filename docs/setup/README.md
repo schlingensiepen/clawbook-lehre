@@ -29,6 +29,17 @@ verwechseln mit den [Kurs-Diensten](kurs-dienste.md)
 weiter unten: Das sind Zugänge zu Diensten, die zentral
 im Kurs laufen (Wiki.js und Docling).
 
+Jede Setup-Seite kennzeichnet ihre Schritte auf drei
+Arten:
+
+- **Das erledigt clawbook** — passiert von selbst; die
+  Seite sagt, woran Sie den Erfolg sehen.
+- **Das tun Sie selbst** — geht nicht automatisch, etwa
+  ein Konto anlegen oder einen Schlüssel beim Anbieter
+  erzeugen (meist im Abschnitt „Beim Anbieter“).
+- **Falls die Automatik nicht geht** — nur nötig, wenn
+  etwas schiefgeht oder Sie es bewusst von Hand machen.
+
 Die Webseiten der Anbieter ändern sich: Menüpfade und
 Bezeichnungen auf den Setup-Seiten gelten zum
 genannten Stand und können inzwischen etwas anders
@@ -249,9 +260,13 @@ allen Seiten dasselbe:
    Ausnahme: Schlüssel für MCP-Server (Stitch, Wiki.js)
    speichert `clawbook agenten schluessel` in
    `~/.clawbook/secrets`, und der Container setzt sie in
-   jedem Terminal — so finden alle Agenten sie. Schlüssel
-   für die Anmeldung der Agenten selbst nimmt dieser
-   Befehl nicht an.
+   jedem Terminal — so finden alle Agenten sie. Das
+   widerspricht der Regel nur scheinbar: Diese Schlüssel
+   gelten nur für einen bestimmten Dienst (Stitch,
+   Wiki.js) und stellen nicht um, wie ein Agent sich
+   anmeldet oder abrechnet. Schlüssel für die Anmeldung
+   der Agenten selbst nimmt der Befehl deshalb nicht an. Siehe
+   [Agenten-Ausstattung](../agenten-ausstattung.md).
 2. **Nie im Befehl tippen.** Alles, was Sie im
    Terminal eingeben, landet in der Befehlshistorie
    (`~/.bash_history`). Wo ein Schlüssel in einen

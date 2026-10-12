@@ -4,12 +4,12 @@ Stand: 2026-10-12
 
 > Die Anbieter ändern ihre Seiten, Menüs und Angebote
 > laufend. Sieht etwas anders aus als hier beschrieben,
-> such dir den aktuellen Weg auf der Seite des Anbieters
-> selbst.
+> suchen Sie den aktuellen Weg bitte selbst auf der
+> Seite des Anbieters.
 
 Zwei Dienste laufen nicht bei einem Anbieter und nicht
-in deinem Container, sondern **zentral im Kurs**.
-Adresse und Zugang bekommst du von der Kursleitung —
+in Ihrem Container, sondern **zentral im Kurs**.
+Adresse und Zugang bekommen Sie von der Kursleitung —
 auf dieser Seite stehen nur Platzhalter.
 
 - **Wiki.js** ist das Wiki des Kurses. Über den
@@ -32,28 +32,29 @@ auf dieser Seite stehen nur Platzhalter.
 
 ## Beim Anbieter
 
-Hier ist der „Anbieter" der Kurs. Du bekommst von der
-Kursleitung:
+**Das tun Sie selbst** — das lässt sich nicht
+automatisieren. Hier ist der „Anbieter" der Kurs. Sie
+bekommen von der Kursleitung:
 
 - für Wiki.js die **Adresse** (im Folgenden
   `https://wiki.example.org`) und einen
   **API-Schlüssel** — ein langes Token, das der Kurs
-  für dich im Wiki erzeugt; es hat ein Ablaufdatum und
+  für Sie im Wiki erzeugt; es hat ein Ablaufdatum und
   ist **persönlich**: nicht an andere weitergeben,
   nicht in Chats oder Repositories;
 - für Docling die **Adresse** des Servers (im
   Folgenden `http://docling.example.org:5001`).
 
-Eventuell sagt die Kursleitung dazu, dass du ein
-**VPN** brauchst: eine Verbindung, die deinen Rechner
+Eventuell sagt die Kursleitung dazu, dass Sie ein
+**VPN** brauchen: eine Verbindung, die Ihren Rechner
 ins Netz der Hochschule holt, damit Dienste erreichbar
 sind, die nicht im offenen Internet stehen. Das VPN
-richtest du unter Windows ein (Anleitung der
+richten Sie unter Windows ein (Anleitung der
 Hochschule); der Container nutzt dann automatisch
 dieselbe Verbindung.
 
-Hast du Adresse und Schlüssel noch nicht, überspringe
-diese Seite; alles andere im clawbook funktioniert
+Haben Sie Adresse und Schlüssel noch nicht, überspringen
+Sie diese Seite; alles andere im clawbook funktioniert
 ohne.
 
 ## Im clawbook
@@ -61,28 +62,36 @@ ohne.
 ### Wiki.js-MCP für alle Agenten
 
 **Das tun Sie selbst:** Adresse und Schlüssel einmal
-im Container eingeben. clawbook fragt jeweils nach dem
-Wert; die Eingabe bleibt unsichtbar und landet nicht in
-der Befehlshistorie.
+im Container eingeben (wo, steht in der
+[Übersicht](README.md#wo-sie-die-befehle-eingeben)).
+Tippen Sie nur den Befehl und drücken Sie Enter;
+clawbook fragt danach mit „Wert für WIKIJS_URL (Eingabe
+bleibt unsichtbar):“ nach dem Wert. Den fügen Sie dann
+ein (Rechtsklick bzw. `Strg+Umschalt+V`, siehe
+[Übersicht](README.md#so-klappt-die-anmeldung-im-browser))
+und drücken Enter. Die Eingabe bleibt unsichtbar und
+landet nicht in der Befehlshistorie.
 
 ```bash
-clawbook agenten schluessel WIKIJS_URL       # Wert: https://wiki.example.org
-clawbook agenten schluessel WIKIJS_API_KEY   # Wert: Ihr Schlüssel
+clawbook agenten schluessel WIKIJS_URL       # fragt nach der Adresse
+clawbook agenten schluessel WIKIJS_API_KEY   # fragt nach dem Schlüssel
 ```
 
-Die Adresse ohne Pfad angeben, also ohne `/graphql` am
-Ende. Damit bekommen die Agenten nur Werkzeuge zum
+Als Adresse geben Sie nur den Anfang an, etwa
+`https://wiki.example.org` — ohne einen Pfad dahinter,
+also ohne `/graphql` am Ende. Damit bekommen die Agenten nur Werkzeuge zum
 **Lesen** — für den Anfang genau richtig, denn so kann
 kein Agent im Wiki versehentlich etwas ändern. Sollen
 sie auch Seiten anlegen und ändern dürfen, zusätzlich:
 
 ```bash
-clawbook agenten schluessel WIKIJS_ENABLE_EDIT   # Wert: true
+clawbook agenten schluessel WIKIJS_ENABLE_EDIT   # fragt nach dem Wert: true eingeben
 ```
 
 Zurück zu nur lesen: `clawbook agenten schluessel
-WIKIJS_ENABLE_EDIT --entfernen`. Alles geht auch im
-clawbook-Menü, Punkt 10, dann `k`.
+WIKIJS_ENABLE_EDIT --entfernen`. Setzen und Ändern geht
+auch im clawbook-Menü (Punkt 10, dann `k`), Entfernen
+nur mit `--entfernen` auf der Kommandozeile.
 
 **Das erledigt clawbook:** Sobald `WIKIJS_URL` und
 `WIKIJS_API_KEY` gesetzt sind, trägt es den Server
@@ -96,10 +105,14 @@ Umgebungsvariablen. Einzelheiten:
 Laufende Agenten bitte neu starten.
 
 **Falls die Automatik nicht geht:** den Server von Hand
-nur bei Claude Code eintragen. Der Schlüssel wird
+nur bei Claude Code eintragen. Achtung: Auf diesem Weg
+steht der Schlüssel im **Klartext** in `~/.claude.json`
+— diese Datei also nie weitergeben (siehe
+[Agenten-Ausstattung](../agenten-ausstattung.md),
+„Diese Dateien nie weitergeben“). Der Schlüssel wird
 vorher unsichtbar abgefragt (Muster in der
-[Übersicht](README.md), Regel 2); die Werte landen in
-`~/.claude.json`, `-s user` heißt: gilt in allen Ihren
+[Übersicht](README.md#drei-regeln-für-schlüssel-und-zugänge),
+Regel 2); `-s user` heißt: gilt in allen Ihren
 Projekten. Nur lesen:
 
 ```bash
@@ -123,7 +136,7 @@ die anderen Agenten stehen in der
 `~/.workspacemanager.yml`. Die Datei entsteht beim
 ersten Start von `wsm` automatisch (siehe
 [Ohne Account](ohne-account.md)); darin steht
-`docling_servers: []` — kein Server. Öffne die Datei
+`docling_servers: []` — kein Server. Öffnen Sie die Datei
 in VS Code (geht aus dem Terminal der
 Remote-SSH-Sitzung heraus):
 
@@ -170,9 +183,9 @@ Docling:
 wsm config --validate
 ```
 
-meldet, dass die Konfiguration gültig ist. Lege dann
-eine Testdatei (ein kleines PDF, das dir gehört) in
-`raw/` eines Projekts und führe `wsm update` aus; in
+meldet, dass die Konfiguration gültig ist. Legen Sie dann
+eine Testdatei (ein kleines PDF, das Ihnen gehört) in
+`raw/` eines Projekts und führen Sie `wsm update` aus; in
 `input/raw/` erscheint die Markdown-Fassung.
 
 ## Typische Fehler
@@ -203,15 +216,15 @@ eine Testdatei (ein kleines PDF, das dir gehört) in
   (siehe oben).
 - **`wsm update` meldet „Docling-Server nicht
   erreichbar"** → Adresse vertippt, Server gerade aus,
-  oder du bist nicht im Netz des Kurses. Die Adresse
+  oder Sie sind nicht im Netz des Kurses. Die Adresse
   im Browser unter Windows prüfen; wenn der Kurs ein
   VPN vorgibt, muss es unter Windows verbunden sein.
 - **`wsm config --validate` meldet einen YAML-Fehler**
   → Einrückung prüfen: zwei Leerzeichen vor dem
   Bindestrich, keine Tabulatoren.
-- **`code` meldet „command not found"** → Du bist
+- **`code` meldet „command not found"** → Sie sind
   per `ssh clawbook` verbunden, nicht im Terminal von
-  VS Code. Dort gibt es `code` nicht; nimm `nano`.
+  VS Code. Dort gibt es `code` nicht; nehmen Sie `nano`.
 
 ## Wenn etwas nicht geht
 

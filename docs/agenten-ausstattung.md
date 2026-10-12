@@ -18,8 +18,33 @@ allen Agenten ein, und zwar je nach Werkzeug als
   Anweisungsdatei des Agenten, der sagt, welche
   Werkzeuge es im Container gibt.
 
-Jeder Abschnitt dieser Seite sagt, zu welcher Art er
-gehört:
+Fast alles davon passiert von selbst. Selbst tun müssen
+Sie nur etwas für die beiden Dienste, die einen
+Schlüssel brauchen: Stitch und Wiki.js.
+
+## In 3 Schritten: Stitch (oder Wiki.js) einrichten
+
+1. **Schlüssel holen** — für Stitch bei Google (siehe
+   [Google](setup/google.md), „Beim Anbieter“), für
+   Wiki.js beim Kurs (siehe
+   [Kurs-Dienste](setup/kurs-dienste.md)).
+2. **Im Container eingeben** (wo das geht, steht in
+   [Setup](setup/README.md#wo-sie-die-befehle-eingeben)):
+
+   ```bash
+   clawbook agenten schluessel STITCH_API_KEY
+   ```
+
+   clawbook fragt danach nach dem Wert; Sie tippen ihn
+   **nicht** hinter den Befehl. Einzelheiten unten in
+   „Das tun Sie selbst“.
+3. **Agenten neu starten** — einen laufenden Agenten mit
+   `/exit` beenden und in einem **neuen Terminal** wieder
+   starten. Prüfen mit `clawbook agenten`: In der Zeile
+   `stitch` steht bei jedem Agenten `ja`.
+
+Jeder weitere Abschnitt dieser Seite sagt, zu welcher
+Art er gehört:
 
 - **Das erledigt clawbook**: passiert von selbst. Hier
   steht, was geschieht und woran Sie es sehen.
@@ -41,10 +66,142 @@ gehört:
 | `graphify` | Skill: Wissensgraph aus Code und Dokumenten, je Agent die passende Fassung | keine |
 | `werkzeuge` | Anweisung: welche Werkzeuge im Container sind | keine |
 
-Kurse und Technikpakete ([Kurse und
-Technikpakete](kurse-und-pakete.md)) können weitere
-Einträge mitbringen. Sie kommen auf demselben Weg bei
-allen Agenten an.
+Auch Kurse und Technikpakete können weitere Einträge
+mitbringen (siehe [Kurse und
+Technikpakete](kurse-und-pakete.md)). Sie kommen auf
+demselben Weg bei allen Agenten an.
+
+## Das tun Sie selbst: Schlüssel für Stitch und Wiki.js
+
+Den Schlüssel erzeugt der Anbieter: für Stitch Google
+(siehe [Google](setup/google.md), „Beim Anbieter“), für
+Wiki.js der Kurs (siehe
+[Kurs-Dienste](setup/kurs-dienste.md)). Im Container
+(siehe [Setup, „Wo Sie die Befehle
+eingeben“](setup/README.md#wo-sie-die-befehle-eingeben))
+geben Sie ihn einmal ein:
+
+```bash
+clawbook agenten schluessel STITCH_API_KEY
+```
+
+Tippen Sie nur diese Zeile und drücken Sie Enter — den
+Schlüssel **nicht** dahinter schreiben. clawbook fragt
+danach selbst:
+
+```text
+Wert für STITCH_API_KEY (Eingabe bleibt unsichtbar):
+```
+
+Fügen Sie jetzt den Schlüssel ein: im Windows Terminal
+bzw. in PowerShell mit einem Rechtsklick, im Terminal
+von VS Code mit `Strg+Umschalt+V` (siehe [Setup, „So
+klappt die Anmeldung im
+Browser“](setup/README.md#so-klappt-die-anmeldung-im-browser)).
+Es erscheint dabei nichts auf dem Bildschirm, auch keine
+Sternchen. Drücken Sie Enter. Dann sehen Sie etwa:
+
+```text
+Schlüssel STITCH_API_KEY gespeichert in /home/student/.clawbook/secrets (nur für Sie lesbar).
+Agenten-Ausstattung wird abgeglichen ...
+  Claude Code:   MCP stitch eingetragen
+  Codex:         MCP stitch eingetragen
+  Copilot CLI:   MCP stitch eingetragen
+  OpenCode:      MCP stitch eingetragen
+  Antigravity:   MCP stitch eingetragen
+  Skills ~/.claude/skills (Claude Code): unverändert
+  Skills ~/.agents/skills (Codex, Copilot CLI, OpenCode): unverändert
+  Skills ~/.gemini/config/skills (Antigravity): unverändert
+Nicht eingetragen, weil ein Schlüssel fehlt:
+  wikijs         fehlt WIKIJS_URL, WIKIJS_API_KEY  (setzen: clawbook agenten schluessel WIKIJS_URL)
+Hinweis: Antigravity löst keine Variablen auf: Schlüssel für HTTP-MCP-Server stehen im Klartext in ~/.gemini/config/mcp_config.json (Datei nur für Sie lesbar).
+Fertig. Laufende Agenten sehen die Änderungen nach einem Neustart.
+Neue Terminals sehen den Schlüssel als Umgebungsvariable; laufende Agenten bitte neu starten.
+Im aktuellen Terminal: . /etc/profile.d/clawbook-secrets.sh
+```
+
+Für Wiki.js sind es zwei Werte, die Adresse und der
+Schlüssel. Jeder Befehl fragt wieder nach seinem Wert:
+
+```bash
+clawbook agenten schluessel WIKIJS_URL       # fragt nach der Adresse, z. B. https://wiki.example.org
+clawbook agenten schluessel WIKIJS_API_KEY   # fragt nach dem Schlüssel
+```
+
+Ohne weiteres bekommt der Agent nur Werkzeuge zum
+Lesen. Soll er im Wiki auch Seiten anlegen und ändern
+dürfen, setzen Sie zusätzlich:
+
+```bash
+clawbook agenten schluessel WIKIJS_ENABLE_EDIT   # fragt nach dem Wert: true eingeben
+```
+
+**Ändern:** denselben Befehl noch einmal aufrufen und
+den neuen Wert eingeben. Setzen und Ändern geht auch im
+clawbook-Menü: Punkt 10, dann `k`.
+
+**Entfernen** geht nur auf der Kommandozeile, zum
+Beispiel:
+
+```bash
+clawbook agenten schluessel STITCH_API_KEY --entfernen
+```
+
+Dann nimmt clawbook auch den Stitch-Server bei allen
+Agenten wieder heraus.
+
+**Wie die Agenten an den Schlüssel kommen:** In den
+Einstellungen der Agenten steht nicht der Schlüssel
+selbst, sondern nur ein **Verweis** wie
+`${STITCH_API_KEY}` — ein Platzhalter, der sagt: „Den
+Wert findest du in der Umgebungsvariablen
+`STITCH_API_KEY`.“ Eine
+[Umgebungsvariable](setup/README.md#begriffe-die-auf-allen-seiten-vorkommen)
+ist ein benannter Wert in Ihrer Terminal-Sitzung. Der
+Agent liest ihn beim Start. Dafür setzt der Container
+alle Schlüssel aus `~/.clawbook/secrets` in jedem
+Terminal als Umgebungsvariablen: per SSH, im Terminal
+von VS Code und in tmux. Ein neues Terminal hat den
+Schlüssel sofort; in einem schon offenen Terminal laden
+Sie ihn mit:
+
+```bash
+. /etc/profile.d/clawbook-secrets.sh
+```
+
+Weil die Schlüssel so in jedem Programm ankommen, nimmt
+clawbook keine an, die die Anmeldung eines Agenten
+umstellen würden (zum Beispiel `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, `GH_TOKEN`); siehe
+[Setup](setup/README.md#drei-regeln-für-schlüssel-und-zugänge),
+„Drei Regeln für Schlüssel und Zugänge“.
+
+**Ausnahme Antigravity:** Antigravity kann keine
+Verweise auflösen. Den Stitch-Schlüssel schreibt
+clawbook dort deshalb im **Klartext** — also den
+Schlüssel selbst, lesbar für jeden, der die Datei
+öffnet — in `~/.gemini/config/mcp_config.json` und
+macht die Datei nur für Sie lesbar. Wiki.js betrifft
+das nicht, denn Antigravity reicht seine
+Umgebungsvariablen an den Wiki.js-Server weiter.
+
+> **Diese Dateien nie weitergeben**
+>
+> - `~/.clawbook/secrets` — alle Schlüssel, die Sie mit
+>   `clawbook agenten schluessel` gesetzt haben
+> - `~/.gemini/config/mcp_config.json` — der
+>   Stitch-Schlüssel im Klartext
+> - `~/.claude.json` — enthält Schlüssel im Klartext,
+>   wenn Sie einen Server von Hand eingetragen haben
+>   (siehe „Falls die Automatik nicht geht“)
+>
+> Nicht in ein Repository, nicht in einen Chat, nicht in
+> eine Hilfe-Anfrage. Bitten Sie auch keinen Agenten,
+> diese Dateien anzuzeigen oder auszugeben — was er
+> liest, geht an den Anbieter. Und: Eine Sicherung Ihres
+> Homes (`home-<datum>.tar`, siehe [Pflege](pflege.md))
+> enthält diese Dateien ebenfalls; behandeln Sie sie wie
+> ein Passwort.
 
 ## Das erledigt clawbook
 
@@ -62,6 +219,35 @@ clawbook agenten sync
 Der Abgleich ist wiederholbar: Ist alles eingetragen,
 meldet er „Alles aktuell, nichts geändert.“ und
 schreibt keine Datei neu.
+
+**Woran Sie es sehen:**
+
+```bash
+clawbook agenten
+```
+
+Dasselbe zeigt Menüpunkt **10** „Agenten-Ausstattung“
+im clawbook-Menü. Sie sehen eine Tabelle mit einer
+Zeile je Eintrag und einer Spalte je Agent:
+
+- `ja`: eingetragen,
+- `SCHLÜSSEL`: ein Schlüssel fehlt, der Eintrag wartet,
+- `FEHLT` oder `ANDERS`: kommt beim nächsten Abgleich,
+- `-`: für diesen Agenten nicht vorgesehen,
+- `aus`: Sie haben den Eintrag selbst abgeschaltet
+  (siehe „Eigene Einträge“ unten),
+- `n. inst.`: dieser Agent ist im Container nicht
+  installiert.
+
+Darunter steht, welche Schlüssel gesetzt sind (nie ihre
+Werte) und wann der letzte Abgleich lief. Die Agenten
+selbst zeigen ihre MCP-Server mit `claude mcp list`,
+`codex mcp list`, `copilot mcp list`, `opencode mcp
+list` und `agy mcp list`.
+
+Ein Agent liest seine Einstellungen nur beim Start.
+Läuft er gerade, beenden Sie ihn nach einer Änderung mit
+`/exit` und starten ihn neu.
 
 **Wohin:** nur in Ihre Benutzer-Einstellungen im
 Home-Verzeichnis, nie in ein Projekt (dort landete es
@@ -94,112 +280,10 @@ und meldet „übernommen“. Einen Skill mit demselben Namen
 und anderem Inhalt legt es vorher in
 `~/.clawbook/agenten/sicherung/` ab.
 
-**Woran Sie es sehen:**
+## Das tun Sie selbst (optional): eigene Einträge
 
-```bash
-clawbook agenten
-```
-
-Dasselbe zeigt Menüpunkt **10** „Agenten-Ausstattung“
-im clawbook-Menü. Sie sehen eine Tabelle mit einer
-Zeile je Eintrag und einer Spalte je Agent:
-
-- `ja`: eingetragen,
-- `SCHLÜSSEL`: ein Schlüssel fehlt, der Eintrag wartet,
-- `FEHLT` oder `ANDERS`: kommt beim nächsten Abgleich,
-- `-`: für diesen Agenten nicht vorgesehen.
-
-Darunter steht, welche Schlüssel gesetzt sind (nie ihre
-Werte) und wann der letzte Abgleich lief. Die Agenten
-selbst zeigen ihre MCP-Server mit `claude mcp list`,
-`codex mcp list`, `copilot mcp list`, `opencode mcp
-list` und `agy mcp list`.
-
-Ein Agent liest seine Einstellungen nur beim Start.
-Läuft er gerade, beenden Sie ihn nach einer Änderung mit
-`/exit` und starten ihn neu.
-
-## Das tun Sie selbst: Schlüssel für Stitch und Wiki.js
-
-Den Schlüssel erzeugt der Anbieter: für Stitch Google
-(siehe [Google](setup/google.md), „Beim Anbieter“), für
-Wiki.js der Kurs (siehe
-[Kurs-Dienste](setup/kurs-dienste.md)). Im Container
-geben Sie ihn einmal ein:
-
-```bash
-clawbook agenten schluessel STITCH_API_KEY
-```
-
-clawbook fragt „Wert für STITCH_API_KEY (Eingabe bleibt
-unsichtbar):“. Fügen Sie den Schlüssel ein (er bleibt
-unsichtbar) und drücken Sie Enter. clawbook speichert
-ihn in `~/.clawbook/secrets`, einer Datei, die nur Sie
-lesen können, trägt Stitch gleich bei allen Agenten ein
-und meldet zum Beispiel „Claude Code: MCP stitch
-eingetragen“.
-
-Für Wiki.js sind es zwei Werte, die Adresse und der
-Schlüssel:
-
-```bash
-clawbook agenten schluessel WIKIJS_URL       # Wert z. B. https://wiki.example.org
-clawbook agenten schluessel WIKIJS_API_KEY
-```
-
-Ohne weiteres bekommt der Agent nur Werkzeuge zum
-Lesen. Soll er im Wiki auch Seiten anlegen und ändern
-dürfen, setzen Sie zusätzlich:
-
-```bash
-clawbook agenten schluessel WIKIJS_ENABLE_EDIT   # Wert: true
-```
-
-Ändern: denselben Befehl noch einmal aufrufen.
-Entfernen, zum Beispiel:
-
-```bash
-clawbook agenten schluessel STITCH_API_KEY --entfernen
-```
-
-Dann nimmt clawbook auch den Stitch-Server bei allen
-Agenten wieder heraus. Im clawbook-Menü geht beides
-über Punkt 10, dann `k`.
-
-**Wie die Agenten an den Schlüssel kommen:** In den
-Einstellungen der Agenten steht nur ein Verweis wie
-`${STITCH_API_KEY}`, nicht der Schlüssel selbst. Der
-Agent liest den Wert beim Start aus seiner Umgebung.
-Dafür setzt der Container alle Schlüssel aus
-`~/.clawbook/secrets` in jedem Terminal als
-Umgebungsvariablen: per SSH, im Terminal von VS Code und
-in tmux. Ein neues Terminal hat den Schlüssel sofort; in
-einem schon offenen Terminal laden Sie ihn mit:
-
-```bash
-. /etc/profile.d/clawbook-secrets.sh
-```
-
-Weil die Schlüssel so in jedem Programm ankommen, nimmt
-clawbook keine an, die die Anmeldung eines Agenten
-umstellen würden (zum Beispiel `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `GH_TOKEN`); siehe
-[Setup](setup/README.md), „Drei Regeln für Schlüssel und
-Zugänge“.
-
-**Ausnahme Antigravity:** Antigravity kann keine
-Verweise auflösen. Den Stitch-Schlüssel schreibt
-clawbook dort deshalb im Klartext in
-`~/.gemini/config/mcp_config.json` und macht die Datei
-nur für Sie lesbar. Behandeln Sie diese Datei wie ein
-Passwort: nicht weitergeben, nie in ein Repository.
-Wiki.js betrifft das nicht, denn Antigravity reicht
-seine Umgebungsvariablen an den Wiki.js-Server weiter.
-
-## Für Fortgeschrittene: eigene Einträge
-
-Eigene Einträge legen Sie als JSON-Datei in
-`~/.clawbook/agenten.d/` ab, zum Beispiel
+Nur für Fortgeschrittene. Eigene Einträge legen Sie als
+JSON-Datei in `~/.clawbook/agenten.d/` ab, zum Beispiel
 `~/.clawbook/agenten.d/mein-server.json`. Danach
 `clawbook agenten sync`. Ein Eintrag mit demselben
 Namen wie einer aus dem Image ersetzt diesen. Eine Datei
@@ -207,7 +291,7 @@ enthält einen Eintrag oder eine Liste von Einträgen.
 
 Einen Eintrag des Images abschalten (hier den
 Playwright-MCP; clawbook nimmt ihn bei allen Agenten
-heraus):
+heraus, die Tabelle zeigt dann `aus`):
 
 ```json
 {"name": "playwright", "aus": true}
@@ -289,6 +373,20 @@ Einträge mit denselben Namen übernimmt der nächste
 automatische Abgleich; soll er das nicht, schalten Sie
 den Eintrag ab (siehe oben, `"aus": true`).
 
+**Vorab zum Schlüssel:** Bei Claude Code und
+Antigravity landet der Stitch-Schlüssel auf diesem Weg
+im **Klartext** in der jeweiligen Datei
+(`~/.claude.json` bzw.
+`~/.gemini/config/mcp_config.json`) — siehe den Kasten
+„Diese Dateien nie weitergeben“ oben. Damit er nicht in
+der Befehlshistorie landet, fragen Sie ihn mit
+`read -rs KEY` unsichtbar ab (Muster in
+[Setup](setup/README.md#drei-regeln-für-schlüssel-und-zugänge),
+Regel 2). Codex, Copilot CLI und OpenCode lesen ihn
+dagegen aus der Umgebungsvariablen `STITCH_API_KEY`;
+die setzen Sie mit `clawbook agenten schluessel
+STITCH_API_KEY`.
+
 **Claude Code:**
 
 ```bash
@@ -335,7 +433,7 @@ unter `"mcp"`:
 ```
 
 **Antigravity** (Schlüssel im Klartext, darum danach
-`chmod`):
+`chmod`, damit nur Sie die Datei lesen können):
 
 ```bash
 agy mcp add playwright -- playwright-mcp --headless
@@ -367,6 +465,10 @@ Sie wieder löschen.
   `SCHLÜSSEL`** → Der Schlüssel ist noch nicht gesetzt:
   `clawbook agenten schluessel STITCH_API_KEY` (bzw.
   `WIKIJS_URL` und `WIKIJS_API_KEY`).
+- **„Leere Eingabe, nichts geändert.“** → Bei der Frage
+  nach dem Wert wurde nichts eingefügt. Befehl noch
+  einmal aufrufen und den Schlüssel bei der Frage
+  einfügen, nicht hinter den Befehl schreiben.
 - **Der Agent kennt einen neuen Server oder Skill
   nicht** → Er lief schon vor dem Abgleich. Mit `/exit`
   beenden und neu starten.
@@ -398,7 +500,8 @@ Sie wieder löschen.
 
 Erst „Typische Fehler“ oben. Dann `clawbook agenten`:
 Unter „Letzter Abgleich“ stehen die Fehler des letzten
-Laufs. Im Kurs melden mit der Ausgabe von `clawbook
-agenten sync`, aber **nie** mit einem Schlüssel und nie
-mit dem Inhalt von `~/.clawbook/secrets` oder
-`~/.gemini/config/mcp_config.json`.
+Laufs. Wenden Sie sich an die Betreuung Ihrer
+Lehrveranstaltung, mit der Ausgabe von `clawbook
+agenten sync` — aber **nie** mit einem Schlüssel und nie
+mit dem Inhalt der Dateien aus dem Kasten „Diese
+Dateien nie weitergeben“.

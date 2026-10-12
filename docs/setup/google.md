@@ -4,20 +4,20 @@ Stand: 2026-10-12
 
 > Die Anbieter ändern ihre Seiten, Menüs und Angebote
 > laufend. Sieht etwas anders aus als hier beschrieben,
-> such dir den aktuellen Weg auf der Seite des Anbieters
-> selbst.
+> suchen Sie den aktuellen Weg bitte selbst auf der
+> Seite des Anbieters.
 
-Mit einem Google-Konto nutzt du im clawbook drei
+Mit einem Google-Konto nutzen Sie im clawbook drei
 Dinge:
 
 - **Antigravity CLI** (`agy`) — Googles Coding-Agent im
   Terminal mit Gemini-Modellen, vergleichbar mit Claude
   Code.
 - **NotebookLM** (`notebooklm`) — Googles
-  Recherche-Werkzeug: Du legst Quellen (PDF, Webseiten)
-  in ein Notizbuch und stellst Fragen dazu oder lässt
+  Recherche-Werkzeug: Sie legen Quellen (PDF, Webseiten)
+  in ein Notizbuch und stellen Fragen dazu oder lassen
   Zusammenfassungen, Podcasts und Quizze erzeugen. Im
-  clawbook steuerst du es von der Kommandozeile, und
+  clawbook steuern Sie es von der Kommandozeile, und
   alle Agenten können es über den Skill `notebooklm`
   nutzen (den richtet clawbook ein, siehe
   [Agenten-Ausstattung](../agenten-ausstattung.md)).
@@ -45,7 +45,7 @@ Studierendenstatus, gültig bis 31.12.2026
 (<https://gemini.google/students/>); der Plan erhöht
 laut Google-Hilfe unter anderem die NotebookLM-Limits.
 Nach dem Gratisjahr wird der Plan kostenpflichtig,
-wenn du ihn nicht kündigst — Datum in den Kalender.
+wenn Sie ihn nicht kündigen — Datum in den Kalender.
 Für den Kurs reichen die kostenlosen Stufen.
 
 Menüpfade unten gelten zum genannten Stand; Google
@@ -53,9 +53,12 @@ baut seine Oberflächen oft um.
 
 ## Beim Anbieter
 
+**Das tun Sie selbst** — das lässt sich nicht
+automatisieren:
+
 1. Ein Google-Konto anlegen oder das bestehende
-   nutzen. Überlege, ob du dein privates Konto für
-   Kursarbeit nehmen willst oder ein eigenes anlegst —
+   nutzen. Überlegen Sie, ob Sie Ihr privates Konto für
+   Kursarbeit nehmen wollen oder ein eigenes anlegen —
    NotebookLM-Notizbücher und Stitch-Projekte hängen am
    Konto. Zwei-Faktor-Anmeldung einschalten
    (Google-Konto → Sicherheit).
@@ -78,7 +81,7 @@ beim Anbieter; die Anmeldung passiert im clawbook.
 ### Antigravity CLI
 
 `agy` liest und ändert Dateien in dem Ordner, in dem
-du es startest. Deshalb in einen Projektordner
+Sie es starten. Deshalb in einen Projektordner
 wechseln:
 
 ```bash
@@ -86,13 +89,13 @@ cd ~/source/<Bereich>/<Projekt>
 agy
 ```
 
-Beim ersten Start wählst du die Anmeldung mit dem
-Google-Konto. Weil du per SSH verbunden bist, erkennt
+Beim ersten Start wählen Sie die Anmeldung mit dem
+Google-Konto. Weil Sie per SSH verbunden sind, erkennt
 `agy` das und zeigt einen Link: im Browser unter
 Windows öffnen, Google-Konto wählen, Zugriff erlauben
 (siehe [Übersicht](README.md), „So klappt die
 Anmeldung im Browser"). Der Browser zeigt einen Code,
-den du ins Terminal einfügst. Danach startet die
+den Sie ins Terminal einfügen. Danach startet die
 Oberfläche; `agy "Frage"` erledigt eine Aufgabe und
 beendet sich. Verlassen mit `/exit`, abmelden mit
 `/logout`.
@@ -102,11 +105,11 @@ beendet sich. Verlassen mit `/exit`, abmelden mit
 NotebookLM kennt keine Gerätecodes: Die Anmeldung
 läuft über ein echtes Browserfenster, das **im
 Container** geöffnet wird. Dafür hat der Container
-einen eigenen Bildschirm, den du per Remote-Desktop
-siehst (siehe [Installation](../installation.md),
-Abschnitt 6). Du arbeitest mit zwei Fenstern:
+einen eigenen Bildschirm, den Sie per Remote-Desktop
+sehen (siehe [Installation](../installation.md),
+Abschnitt 6). Sie arbeiten mit zwei Fenstern:
 
-- **Fenster A** — dein Terminal im Container (VS Code
+- **Fenster A** — Ihr Terminal im Container (VS Code
   oder `ssh clawbook`; Eingabeaufforderung
   `student@…`).
 - **Fenster B** — die Remotedesktopverbindung, die
@@ -121,7 +124,7 @@ Abschnitt 6). Du arbeitest mit zwei Fenstern:
 
    Die Zertifikatswarnung bestätigen (das Zertifikat
    ist selbst ausgestellt, der Bildschirm ist nur von
-   deinem Rechner aus erreichbar); ein Passwort gibt
+   Ihrem Rechner aus erreichbar); ein Passwort gibt
    es nicht. Fenster B zeigt einen leeren Bildschirm
    mit einer Leiste oben.
 
@@ -162,7 +165,7 @@ Abschnitt 6). Du arbeitest mit zwei Fenstern:
    (`notebooklm-fix-cookies` können Sie auch selbst
    aufrufen.)
 
-6. Fenster B kannst du schließen; das trennt nur die
+6. Fenster B können Sie schließen; das trennt nur die
    Anzeige.
 
 Die Anmeldung läuft nach einiger Zeit ab; dann die
@@ -178,18 +181,26 @@ Anfrage an NotebookLM, also auch ohne Internet. Die Daten liegen in
 ### Stitch für alle Agenten
 
 **Das tun Sie selbst:** den Schlüssel aus dem
-Abschnitt „Beim Anbieter“ einmal im Container
-eingeben:
+Abschnitt „Beim Anbieter“ einmal im Container eingeben
+(wo, steht in der
+[Übersicht](README.md#wo-sie-die-befehle-eingeben)).
+Tippen Sie nur diese Zeile, ohne den Schlüssel dahinter:
 
 ```bash
 clawbook agenten schluessel STITCH_API_KEY
 ```
 
-clawbook fragt „Wert für STITCH_API_KEY (Eingabe bleibt
-unsichtbar):“. Schlüssel einfügen, Enter. Er landet in
-`~/.clawbook/secrets` (nur für Sie lesbar), nicht in der
-Befehlshistorie. Das geht auch im clawbook-Menü, Punkt
-10, dann `k`.
+clawbook fragt danach „Wert für STITCH_API_KEY (Eingabe
+bleibt unsichtbar):“. Schlüssel einfügen (Rechtsklick
+bzw. `Strg+Umschalt+V`, siehe
+[Übersicht](README.md#so-klappt-die-anmeldung-im-browser);
+es erscheint nichts auf dem Bildschirm), Enter. Er
+landet in `~/.clawbook/secrets` (nur für Sie lesbar),
+nicht in der Befehlshistorie. Setzen und Ändern geht
+auch im clawbook-Menü (Punkt 10, dann `k`); entfernen
+nur mit `clawbook agenten schluessel STITCH_API_KEY
+--entfernen`. Die vollständige Ausgabe zeigt die
+[Agenten-Ausstattung](../agenten-ausstattung.md).
 
 **Das erledigt clawbook:** Gleich danach trägt es Stitch
 bei Claude Code, Codex, Copilot CLI, OpenCode und
@@ -210,9 +221,14 @@ eine Anmeldeseite für …“); der Agent nutzt die
 Stitch-Werkzeuge selbst.
 
 **Falls die Automatik nicht geht:** Stitch von Hand nur
-bei Claude Code eintragen. Den Schlüssel fragen Sie
-dafür unsichtbar ab (Muster in der
-[Übersicht](README.md), Regel 2):
+bei Claude Code eintragen. Achtung: Auf diesem Weg steht
+der Schlüssel im **Klartext** in `~/.claude.json` —
+diese Datei also nie weitergeben (siehe
+[Agenten-Ausstattung](../agenten-ausstattung.md),
+„Diese Dateien nie weitergeben“). Den Schlüssel fragen
+Sie dafür unsichtbar ab (Muster in der
+[Übersicht](README.md#drei-regeln-für-schlüssel-und-zugänge),
+Regel 2):
 
 ```bash
 read -rs KEY
@@ -234,7 +250,7 @@ Wege für die anderen Agenten stehen in der
 ## Prüfen
 
 Antigravity: `agy` starten; erscheint die Oberfläche
-ohne Anmeldeaufforderung, bist du angemeldet.
+ohne Anmeldeaufforderung, sind Sie angemeldet.
 
 NotebookLM:
 
@@ -274,8 +290,8 @@ echter Entwurf zeigt es.
 - **`notebooklm login` öffnet kein Fenster in
   Fenster B** → Normalerweise weiß das Terminal über
   die Variable `DISPLAY=:0`, wo der Bildschirm ist.
-  Prüfe mit `echo $DISPLAY`; ist die Ausgabe leer,
-  rufe `DISPLAY=:0 notebooklm login` auf oder nutze
+  Prüfen Sie mit `echo $DISPLAY`; ist die Ausgabe leer,
+  rufen Sie `DISPLAY=:0 notebooklm login` auf oder nutzen Sie
   das Terminal-Symbol in der Leiste von Fenster B.
 - **`notebooklm login` meldet „Playwright not
   installed"** → Das Image ist älter als die Korrektur
@@ -291,8 +307,8 @@ echter Entwurf zeigt es.
   Containers („Dieser Browser ist möglicherweise nicht
   sicher")** → Nochmal versuchen; die
   Zwei-Faktor-Anmeldung im Google-Konto erhöht Googles
-  Vertrauen in den Login. Hilft das nicht, frag im
-  Kurs.
+  Vertrauen in den Login. Hilft das nicht, wenden Sie
+  sich an die Betreuung Ihrer Lehrveranstaltung.
 - **`agy` zeigt keinen Link, sondern versucht einen
   Browser zu starten** → Per `ssh clawbook` neu
   verbinden; `agy` erkennt die SSH-Sitzung an deren
@@ -316,8 +332,8 @@ echter Entwurf zeigt es.
   Anmeldung. Das ist ein bekanntes Problem von Claude
   Code. Eintrag prüfen (`claude mcp get stitch` muss
   den Header zeigen) und mit `clawbook agenten sync`
-  neu anlegen lassen; tritt es weiterhin auf, melde es
-  im Kurs — das Image bekommt dann eine neuere
+  neu anlegen lassen; tritt es weiterhin auf, melden Sie
+  es der Betreuung Ihrer Lehrveranstaltung — das Image bekommt dann eine neuere
   Claude-Code-Version.
 - **Stitch antwortet mit Kontingent-Fehler** → Das
   monatliche Kontingent ist verbraucht. Bis zum

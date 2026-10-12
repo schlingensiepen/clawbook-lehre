@@ -298,7 +298,11 @@ Paket-Cache gerade belegt, zeigt im Container
 `clawbook status` (Abschnitt 10).
 
 **Die Sicherung enthält Ihre Anmeldungen bei allen
-Werkzeugen und Ihren privaten SSH-Schlüssel.** Wer die
+Werkzeugen, Ihren privaten SSH-Schlüssel und die
+Schlüssel der Agenten-Ausstattung** (`~/.clawbook/secrets`,
+bei Antigravity im Klartext in
+`~/.gemini/config/mcp_config.json`, siehe
+[Agenten-Ausstattung](agenten-ausstattung.md)). Wer die
 Datei hat, kann in Ihrem Namen arbeiten. Behandeln Sie sie
 wie ein Passwort: nicht per E-Mail verschicken, nicht in
 einen geteilten Cloud-Ordner legen, nach dem Umzug auf dem

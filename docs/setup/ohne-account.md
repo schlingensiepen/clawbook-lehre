@@ -58,7 +58,7 @@ playwright-cli install --skills
 
 Danach reicht es, den Agenten zu bitten: „Öffne mit
 playwright-cli die Seite … und sag mir, was dort
-steht." (Den Agenten dürfen Sie duzen.) Von Hand sieht das so aus:
+steht." Von Hand sieht das so aus:
 
 ```bash
 playwright-cli open https://example.org
