@@ -147,14 +147,18 @@ install -d -m 0700 -o _apt -g root \
 #    next start tries again; a skill deleted later stays deleted.
 PW_MARKER=${STATE_DIR}/playwright-skill-eingerichtet
 if [ ! -e "${PW_MARKER}" ]; then
-  if pw_out=$(cd "${USER_HOME}" && runuser -u "${USER_NAME}" -- \
-                timeout 60 playwright-cli install --skills </dev/null 2>&1) \
+  # Output to a file, not through $(...): a leftover background process
+  # holding the pipe could otherwise keep the start waiting.
+  PW_LOG=$(mktemp)
+  if (cd "${USER_HOME}" && runuser -u "${USER_NAME}" -- \
+        timeout -k 5 60 playwright-cli install --skills </dev/null >"${PW_LOG}" 2>&1) \
      && [ -f "${USER_HOME}/.claude/skills/playwright-cli/SKILL.md" ]; then
     echo "Playwright-Skill für Claude Code eingerichtet: ~/.claude/skills/playwright-cli"
     date -u +%Y-%m-%dT%H:%M:%SZ > "${PW_MARKER}"
     chown "${USER_NAME}:${USER_NAME}" "${PW_MARKER}"
   else
     echo "Warnung: Playwright-Skill nicht eingerichtet (nächster Start versucht es erneut):"
-    printf '%s\n' "${pw_out:-}" | tail -n 5
+    tail -n 5 "${PW_LOG}"
   fi
+  rm -f "${PW_LOG}"
 fi

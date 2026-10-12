@@ -50,6 +50,7 @@ import os
 import pwd
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -214,27 +215,52 @@ def key_path():
     return os.path.join(user_home(), ".ssh", "id_ed25519")
 
 
+def capture(cmd, timeout, stdin=subprocess.DEVNULL, env=None, stderr=subprocess.STDOUT):
+    """Runs cmd in a session of its own and returns (exit code, stdout).
+
+    The time limit covers the whole process group: on timeout (or Ctrl+C)
+    the group gets SIGKILL, so grandchildren holding the output pipe (e.g.
+    a browser started by a tool) cannot keep clawbook waiting."""
+    try:
+        p = subprocess.Popen(cmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr,
+                             env=env, start_new_session=True)
+    except OSError as e:
+        return 127, str(e)
+
+    def kill_group():
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            p.kill()
+
+    try:
+        out, _ = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        kill_group()
+        try:
+            out, _ = p.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            out = b""
+        return 124, (out or b"").decode("utf-8", "replace") + \
+            f"\n{cmd[0]}: nach {timeout} s abgebrochen"
+    except BaseException:
+        kill_group()
+        p.wait()
+        raise
+    return p.returncode, out.decode("utf-8", "replace")
+
+
 def run(cmd, timeout=60, stdin=subprocess.DEVNULL, env=None):
     """Runs a command; returns (exit code, stdout+stderr as text).
     env: extra environment variables."""
     full_env = dict(os.environ, **env) if env else None
-    try:
-        p = subprocess.run(cmd, stdin=stdin, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, timeout=timeout, env=full_env)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return 127, str(e)
-    return p.returncode, p.stdout.decode("utf-8", "replace")
+    return capture(cmd, timeout, stdin=stdin, env=full_env)
 
 
 def run_stdout(cmd, timeout=60):
     """Like run(), but returns only stdout (stderr is dropped) - for
     commands whose stdout is parsed as JSON."""
-    try:
-        p = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, timeout=timeout)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return 127, str(e)
-    return p.returncode, p.stdout.decode("utf-8", "replace")
+    return capture(cmd, timeout, stderr=subprocess.DEVNULL)
 
 
 def read_build():
@@ -1830,13 +1856,17 @@ def git_identity_offer(only_if_unset=False):
 
 def cmd_github_identity(opts):
     """clawbook github identitaet: --json reports the plan (and never asks);
-    --yes sets it without asking."""
+    --yes sets it without asking - but only when nothing different is set:
+    other existing values are replaced only after the question on a terminal."""
     plan = git_identity_collect()
-    if opts["yes"] and plan["aktion"] != "gleich":
+    if opts["yes"] and plan["aktion"] == "setzen":
         git_identity_set(plan)
         plan["gesetzt"] = True
         if not opts["json"]:
             print(f"Git-Identität gesetzt: {plan['name']} <{plan['email']}>")
+    elif opts["yes"] and plan["aktion"] == "abweichend":
+        say(opts, "Git ist schon mit anderen Angaben eingerichtet; --yes überschreibt sie "
+                  "nicht. Ändern mit Rückfrage: clawbook github identitaet")
     if opts["json"]:
         plan.setdefault("gesetzt", False)
         sys.stdout.write(dump_json(plan))
@@ -1915,11 +1945,17 @@ def wsm_renew():
     os.rename(path, backup)
     rc, out = run(as_user([WSM_PYTHON, "-I", "-c", WSM_CREATE]), timeout=60)
     if rc != 0 or not os.path.isfile(path):
-        if not os.path.exists(path):
-            os.rename(backup, path)
         detail = out.strip().splitlines()[-1] if out.strip() else f"Exit-Code {rc}"
-        raise CliError(f"wsm hat keine neue Konfiguration geschrieben ({detail}); "
-                       "die alte Datei ist wieder an ihrem Platz.")
+        # A half written new file must not stay: put the old one back.
+        try:
+            if os.path.lexists(path):
+                os.remove(path)
+            os.rename(backup, path)
+            where = "die alte Datei ist wieder an ihrem Platz."
+        except OSError as e:
+            where = (f"die alte Datei ließ sich nicht zurücklegen ({e}); sie liegt in "
+                     f"{backup}.")
+        raise CliError(f"wsm hat keine neue Konfiguration geschrieben ({detail}); {where}")
     return backup
 
 
@@ -1931,6 +1967,9 @@ Sie kennt nur den Ordner ~/source. Die neue Standard-Konfiguration teilt ihn in
 Bereiche wie ~/source/github (eigene Projekte), ~/source/samples und
 ~/source/sandbox. Die alte Datei wird gesichert; Ihre Projekte unter ~/source
 bleiben, wie sie sind."""
+
+WSM_OWN_SETTINGS = ("Eigene Anpassungen aus der alten Datei (etwa Docling-Server oder weitere\n"
+                    "Locations) übernehmen Sie bei Bedarf von Hand aus der Sicherung.")
 
 
 def wsm_offer(ask_again=False):
@@ -1954,6 +1993,7 @@ def wsm_offer(ask_again=False):
     backup = wsm_renew()
     print("Neue Konfiguration angelegt: ~/.workspacemanager.yml")
     print(f"Die alte Datei liegt in {backup}.")
+    print(WSM_OWN_SETTINGS)
     return True
 
 
@@ -1989,6 +2029,7 @@ def cmd_wsm(opts, args):
                                             sicherung=backup)))
         elif backup:
             print(f"Neue Konfiguration angelegt; die alte Datei liegt in {backup}.")
+            print(WSM_OWN_SETTINGS)
         else:
             print("Nichts zu erneuern: Die wsm-Konfiguration fehlt oder ist aktuell.")
         return 0
@@ -2015,8 +2056,11 @@ NLM_TEXT = {"angemeldet": "angemeldet", "unvollstaendig": "unvollständig",
 NLM_CHECK_HINT = {"unvollstaendig": " (reparieren: clawbook notebooklm)",
                   "nicht_angemeldet": " (Anmeldung: clawbook notebooklm)",
                   "unbekannt": " (prüfen: clawbook notebooklm)"}
-NLM_NETWORK_RE = re.compile(r"resolv|connect|network|timed? ?out|unreachable|name or service",
-                            re.IGNORECASE)
+NLM_NETWORK_RE = re.compile(
+    r"Temporary failure in name resolution|Name or service not known|"
+    r"nodename nor servname|getaddrinfo failed|Network is unreachable|No route to host|"
+    r"Connection refused|Connection reset|Connection timed out|ConnectError|ConnectTimeout",
+    re.IGNORECASE)
 
 NLM_LOGIN = """\
 So melden Sie sich an:
@@ -2114,6 +2158,7 @@ def notebooklm_fix():
 
 
 def cmd_notebooklm(opts):
+    say(opts, "Prüfe die NotebookLM-Anmeldung (mit Anfrage an NotebookLM) ...")
     state = notebooklm_state(test=True)
     if state["zustand"] == "unvollstaendig" and state["reparierbar"]:
         if not opts["json"]:
@@ -2125,6 +2170,7 @@ def cmd_notebooklm(opts):
                                  and ask_yes_default("Jetzt reparieren?"))
         if repair:
             ok, out = notebooklm_fix()
+            say(opts, "Prüfe die NotebookLM-Anmeldung erneut ...")
             state = notebooklm_state(test=True)
             state["repariert"] = ok
             if not opts["json"]:

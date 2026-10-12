@@ -232,6 +232,10 @@ out=$(ssh_tty '\n' "${FAKE} clawbook github identitaet; git config --file /tmp/f
 if ! has 'Die Angaben aus GitHub übernehmen\? \[j/N\]' || ! has '^Someone Else'; then
   fail "git identity overwrote a different name without consent: ${out}"
 fi
+out=$(ssh_run "${FAKE} clawbook github identitaet --yes --json 2>/dev/null; git config --file /tmp/fake-gitconfig user.name")
+if ! has '"gesetzt": false' || ! has '^Someone Else'; then
+  fail "clawbook github identitaet --yes overwrote a different name: ${out}"
+fi
 ssh_run '! git config --global user.name' >/dev/null || fail "git identity test touched ~/.gitconfig"
 ssh_run 'cat > ~/.workspacemanager.yml' <<'YML'
 locations:
