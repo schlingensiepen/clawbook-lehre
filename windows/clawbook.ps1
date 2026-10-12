@@ -64,7 +64,7 @@ $KnownHosts = Join-Path $SshDir 'known_hosts_clawbook'
 $MarkBegin = '# >>> clawbook (verwaltet von clawbook.ps1 - nicht von Hand aendern)'
 $MarkEnd = '# <<< clawbook'
 
-# VSCodePack: portable VS Code per course id (DEC-054). The course
+# VSCodePack: portable VS Code per course id. The course
 # description comes from the product repository for now; course packages
 # will provide it from inside the container later.
 $PackRoot = Join-Path $AppDir 'vscode'
