@@ -62,6 +62,19 @@ Wichtig für den Alltag:
   Home-Verzeichnis. Ihre Projekte und Anmeldungen
   berühren sie nicht.
 
+Die drei Begriffe auf einen Blick:
+
+| Begriff | Was es ist | Wo es liegt | Wie es entsteht |
+|---|---|---|---|
+| Technikpaket | Werkzeuge einer Technik, zum Beispiel Java | im Container | als Teil eines Kurses oder einzeln im Menü „Pakete und Kurse" |
+| Kurs | Zusammenstellung von Technikpaketen für eine Lehrveranstaltung | im Container | im Menü „Pakete und Kurse" (Abschnitt 2) |
+| VSCodePack | ein eigenes VS Code für einen Kurs (oder das Grundpack) | unter Windows | das Verwaltungs-Skript richtet es ein (Abschnitt 3) |
+
+Verwechseln Sie „Pack" und „Paket" nicht: Ein
+**VSCodePack** ist ein VS Code unter Windows. Ein
+**Paket** (Kurs oder Technikpaket) ist Software im
+Container, installiert von der Paketverwaltung `apt`.
+
 Kurse und Technikpakete kommen aus einer eigenen,
 signierten Paketquelle des Projekts. Das Image vertraut
 nur deren Schlüssel; fremde Quellen kommen auf diesem Weg
@@ -78,20 +91,37 @@ Lehrveranstaltung.
 
 Sie brauchen dafür eine Internetverbindung und, je nach
 Kurs, einige Minuten Zeit. Es gibt zwei Wege zum selben
-Menü:
+Menü. Der Menüpunkt „Kurse und Technikpakete" im
+Windows-Skript und der Menüpunkt „Pakete und Kurse" im
+Container sind dasselbe Menü; das Windows-Skript öffnet
+nur das Menü im Container.
 
-- **Über das Verwaltungs-Skript (empfohlen):** den Befehl
-  aus der [Installation](installation.md), Abschnitt 2,
-  ausführen und **[11] Kurse und Technikpakete** wählen.
-  Läuft der Container nicht, startet das Skript ihn
-  zuerst („Der Container läuft nicht – ich starte ihn
-  zuerst."). Der Vorteil: Danach richtet das Skript gleich
-  das passende VS Code ein (Abschnitt 3).
+- **Über das Verwaltungs-Skript (empfohlen):** PowerShell
+  öffnen und den gewohnten Befehl ausführen — im selben
+  Fenster genügt die **Pfeiltaste nach oben** und Enter,
+  sonst den Befehl erneut einfügen:
+
+  ```powershell
+  irm https://raw.githubusercontent.com/schlingensiepen/clawbook-lehre/main/get-clawbook.ps1 | iex
+  ```
+
+  Im Menü **[11] Kurse und Technikpakete** wählen. Läuft
+  der Container nicht, startet das Skript ihn zuerst
+  („Der Container läuft nicht – ich starte ihn
+  zuerst."). Der Vorteil dieses Wegs: Wenn Sie das Menü
+  im Container mit Enter verlassen, richtet das Skript
+  gleich das passende VS Code ein (Abschnitt 3). Danach
+  endet das Skript; VS Code starten Sie mit einem
+  weiteren Aufruf und **[9]** (Abschnitt 4).
 - **Im Container:** in PowerShell `ssh clawbook`, im
   clawbook-Menü **6 Pakete und Kurse** wählen. Haben Sie
   das Menü schon geschlossen, öffnen Sie es mit dem Befehl
   `clawbook`; direkt in das Kurs-Menü führt
-  `clawbook pakete`.
+  `clawbook pakete`. Das VS Code zum Kurs richtet aber
+  nur das Windows-Skript ein: Verlassen Sie danach das
+  Menü mit `0`, kehren Sie mit `exit` zu PowerShell
+  zurück und rufen Sie das Verwaltungs-Skript auf
+  (Abschnitt 3).
 
 Zuerst meldet `clawbook` „Paketquellen werden aktualisiert
 ...". Dann zeigt es die Kurse; `[ ]` heißt „nicht
@@ -113,14 +143,26 @@ Geben Sie die Nummer des Kurses ein und drücken Sie Enter.
 hinzufügen (Kurs Ingenieurinformatik).", und übergibt an
 die Paketverwaltung von Debian (`apt`). Die zeigt, welche
 Pakete sie installiert und wie viel sie herunterlädt, und
-fragt, ob sie fortfahren soll. Bestätigen Sie mit Enter.
-Danach laufen viele Zeilen durch; das ist normal.
+fragt, ob sie fortfahren soll — etwa so (gekürzt; Zahlen
+und Paketnamen je nach Kurs):
 
-Am Ende meldet `clawbook` „Installiert: kurs-inf. Stand
-gespeichert in /home/student/.clawbook/stand.json." und
-„Für VS Code unter Windows: Das passende VSCodePack
-richtet das Windows-Skript ein." In der Liste steht der
-Kurs jetzt mit `[x]`. Mit Enter kommen Sie zurück.
+```text
+Die folgenden NEUEN Pakete werden installiert:
+  clawbook-db-sqlite clawbook-java clawbook-spring … kurs-inf …
+Es müssen 812 MB an Archiven heruntergeladen werden.
+Möchten Sie fortfahren? [J/n]
+```
+
+Bestätigen Sie mit Enter. Danach laufen viele Zeilen
+durch; das ist normal.
+
+Bei `kurs-iot` kommt jetzt noch die Frage nach
+PlatformIO (unten). Am Ende meldet `clawbook`
+„Installiert: kurs-inf. Stand gespeichert in
+/home/student/.clawbook/stand.json." und „Für VS Code
+unter Windows: Das passende VSCodePack richtet das
+Windows-Skript ein." In der Liste steht der Kurs jetzt
+mit `[x]`. Mit Enter kommen Sie zurück.
 
 **So viel wird heruntergeladen** (ungefähre Werte):
 
@@ -147,7 +189,8 @@ Home in etwa der Größe der Downloads.
 bringt PlatformIO mit, das Werkzeug für Programme auf
 Mikrocontrollern wie dem ESP32. Für den ersten Build
 braucht PlatformIO noch eine große Plattform mit Compiler.
-Nach der Installation fragt `clawbook` deshalb:
+Nach der Installation, noch vor der Meldung
+„Installiert: …", fragt `clawbook` deshalb:
 
 ```text
 PlatformIO für ESP32 vorladen
@@ -164,7 +207,8 @@ PlatformIO jetzt vorladen? [j/N]
   lädt jetzt die ESP32-Plattform (etwa 6 GB) und baut ein
   Testprojekt. Bitte warten ..." und am Ende
   „PlatformIO ist vorgeladen (…); ~/.platformio belegt
-  …".
+  …". Bis zu 20 Minuten Warten sind dabei normal;
+  brechen Sie nicht ab und lassen Sie das Fenster offen.
 - Enter heißt „nein". Dann erscheint „PlatformIO
   vorladen (etwa 6 GB) später mit: clawbook pakete
   vorladen". Sie können das jederzeit nachholen:
@@ -204,10 +248,17 @@ einen eigenen Eintrag im Startmenü an:
 Verknüpfung „clawbook VS Code – Ingenieurinformatik“ im Startmenü angelegt. Sie startet zuerst den Container und dann VS Code.
 ```
 
+Danach endet das Skript. VS Code starten Sie mit einem
+weiteren Aufruf (Pfeiltaste nach oben, Enter) und **[9]
+VS Code starten**, oder über den neuen Eintrag im
+Startmenü (Abschnitt 4).
+
 Haben Sie den Kurs stattdessen im Container hinzugefügt
-(über `ssh clawbook`), kommt dieselbe Frage beim nächsten
-**[1] starten und verbinden** oder **[9] VS Code
-starten**.
+(über `ssh clawbook`), kehren Sie mit `exit` zu
+PowerShell zurück und rufen das Verwaltungs-Skript auf
+(Pfeiltaste nach oben oder Befehl erneut einfügen).
+Dieselbe Frage kommt dann bei **[1] starten und
+verbinden** oder **[9] VS Code starten**.
 
 Sie können die VSCodePacks auch selbst einrichten:
 **[10] VSCodePacks einrichten** öffnet ein Untermenü:
@@ -294,6 +345,10 @@ etwa 6 GB so wieder frei:
 ```bash
 rm -rf ~/.platformio
 ```
+
+Installieren Sie `kurs-iot` später wieder, lädt der
+nächste Build (oder `clawbook pakete vorladen`) die etwa
+6 GB erneut.
 
 ## 6. Einzelne Technikpakete (für Fortgeschrittene)
 

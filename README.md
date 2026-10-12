@@ -25,18 +25,18 @@ ein Menü: beim ersten Mal „neu einrichten", danach
 „starten", „aktualisieren", „mitnehmen" und mehr.
 Voraussetzung ist WSL ab Version 3.0.1 (`wsl --version`
 zeigt sie, `wsl --update` aktualisiert ohne
-Administrator-Rechte). Was dann passiert und wie du dich
-verbindest, steht in der [Installation](docs/installation.md).
+Administrator-Rechte). Was dann passiert und wie Sie sich
+verbinden, steht in der [Installation](docs/installation.md).
 
-> **Studierst du an der TH Ingolstadt?** In den CIP-Pools
-> sind WSL und WSLC bereits installiert. Willst du
-> clawbook woanders nutzen, folge den Hinweisen zur
+> **Studieren Sie an der TH Ingolstadt?** In den CIP-Pools
+> sind WSL und WSLC bereits installiert. Wollen Sie
+> clawbook woanders nutzen, folgen Sie den Hinweisen zur
 > [Installation zu Hause](docs/installation.md#wsl-zu-hause-installieren).
 
 ## Anleitungen
 
 - [Wegweiser](docs/README.md) — was clawbook ist, in
-  welcher Reihenfolge du die Anleitungen liest, und die
+  welcher Reihenfolge Sie die Anleitungen lesen, und die
   wichtigsten Begriffe
 - [Installation](docs/installation.md) — Voraussetzungen,
   der eine Befehl, verbinden mit Terminal, VS Code und
@@ -55,7 +55,7 @@ verbindest, steht in der [Installation](docs/installation.md).
   oder Linux (nicht vom Kurs getestet)
 
 Bei Problemen hilft der Abschnitt „Wenn etwas nicht geht"
-am Ende jeder Seite — und sonst die Betreuung deiner
+am Ende jeder Seite — und sonst die Betreuung Ihrer
 Lehrveranstaltung.
 
 ## Empfehlung: tmux-helper

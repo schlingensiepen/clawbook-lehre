@@ -20,9 +20,14 @@ pro Anbieter.
 Werkzeuge für einzelne Lehrveranstaltungen — etwa Java,
 .NET, Datenbanken oder PlatformIO für den ESP32 — sind
 nicht von Anfang an im Image. Sie kommen mit einem
-**Kurs-Paket**, das Sie im Container hinzufügen; einen
-Account brauchen Sie dafür nicht. Wie das geht, steht in
-[Kurse und Technikpakete](../kurse-und-pakete.md).
+**Kurs**, den Sie hinzufügen: im Verwaltungs-Skript mit
+Menüpunkt [11] „Kurse und Technikpakete" oder nach
+`ssh clawbook` im clawbook-Menü (Punkt 6). Einen Account
+brauchen Sie dafür nicht. Wie das geht, steht in
+[Kurse und Technikpakete](../kurse-und-pakete.md). Nicht
+verwechseln mit den [Kurs-Diensten](kurs-dienste.md)
+weiter unten: Das sind Zugänge zu Diensten, die zentral
+im Kurs laufen (Wiki.js und Docling).
 
 Die Webseiten der Anbieter ändern sich: Menüpfade und
 Bezeichnungen auf den Setup-Seiten gelten zum

@@ -164,7 +164,8 @@ neue Container hat sie zunächst nicht. Er spielt sie
 deshalb nach dem Start **im Hintergrund** wieder ein,
 nach dem gespeicherten Stand. Die Pakete kommen dabei
 aus dem Paket-Cache in Ihrem Home; liegen dort alle,
-geht das auch ohne Internet. Sie können sich
+geht das auch ohne Internet und dauert meist nur wenige
+Minuten. Sie können sich
 währenddessen schon mit `ssh clawbook` anmelden; bis die
 Wiederherstellung fertig ist, fehlen im Container nur
 noch die Werkzeuge der Kurse.

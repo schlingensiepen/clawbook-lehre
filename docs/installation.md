@@ -929,7 +929,12 @@ Das Verwaltungs-Skript und sein Menü nutzen Sie dann
 nicht; Sie geben alle Befehle selbst ein, und die
 [Pflege-Anleitung](pflege.md) gilt nur sinngemäß. Auch das
 VSCodePack gibt es auf diesem Weg nicht; für VS Code
-nehmen Sie den Ausweichweg aus Abschnitt 5. Für den
+nehmen Sie den Ausweichweg aus Abschnitt 5. Kurse und
+Technikpakete fügen Sie hier nur im Container hinzu,
+mit `clawbook pakete` (nach `ssh clawbook`); Menüpunkt
+[11] und VSCodePacks je Kurs gibt es auf diesem Weg
+nicht, die Erweiterungen eines Kurses installieren Sie
+selbst ([Kurse und Technikpakete](kurse-und-pakete.md)). Für den
 Normalfall gilt die Anleitung oben. Wenn Sie unsicher
 sind, fragen Sie die Betreuung Ihrer Lehrveranstaltung,
 bevor Sie hier anfangen.
