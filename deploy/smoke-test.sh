@@ -7,7 +7,8 @@
 # tools (clawbook-check), build stamp, SSH login as "student" with the key
 # from the home volume, the CLI clawbook (JSON interface), the menu on SSH
 # login and the GitHub question (also in front of wsm), RDP port and
-# XWayland display, Samba share
+# XWayland display, browsers for playwright-cli, Playwright-MCP and
+# notebooklm as "student", Samba share
 # (read/write with the shown password), and that keys survive recreating
 # the container with the same home volume.
 #
@@ -207,6 +208,59 @@ docker exec "${NAME}" bash -c \
   'for _ in $(seq 1 20); do DISPLAY=:0 xhost >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1' \
   || fail "XWayland display :0 is not available"
 echo "rdp ok"
+
+# Browsers as student, without root and without internet (data: URLs):
+# playwright-cli (skills, headless, on display :0), Playwright-MCP over
+# stdio, and the Python Playwright of notebooklm (headless and on :0).
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'set -e; d=$(mktemp -d); cd "$d"
+  timeout 120 playwright-cli install --skills >/dev/null
+  test -f .claude/skills/playwright-cli/SKILL.md
+  timeout 90 playwright-cli open "data:text/html,<title>cli-smoke</title>ok" >/dev/null
+  timeout 30 playwright-cli eval document.title | grep -q cli-smoke
+  timeout 30 playwright-cli close >/dev/null
+  timeout 90 playwright-cli open --headed "data:text/html,<title>cli-headed</title>ok" >/dev/null
+  timeout 30 playwright-cli eval document.title | grep -q cli-headed
+  timeout 30 playwright-cli close >/dev/null
+  cd / && rm -rf "$d"' || fail "playwright-cli could not open a page as student"
+echo "playwright-cli ok"
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'cd "$(mktemp -d)" && timeout 120 python3 -' <<'PY' || fail "Playwright-MCP could not open a page"
+import json, subprocess, sys
+p = subprocess.Popen(["playwright-mcp", "--headless", "--isolated"],
+                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+def call(i, method, params=None):
+    p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method,
+                              "params": params or {}}) + "\n")
+    p.stdin.flush()
+    for line in p.stdout:
+        m = json.loads(line)
+        if m.get("id") == i:
+            return m
+    sys.exit("playwright-mcp ended early")
+call(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "smoke", "version": "1"}})
+p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+r = call(2, "tools/call", {"name": "browser_navigate",
+                           "arguments": {"url": "data:text/html,<title>mcp-smoke</title>ok"}})
+call(3, "tools/call", {"name": "browser_close", "arguments": {}})
+p.stdin.close()
+p.wait(timeout=30)
+if "mcp-smoke" not in json.dumps(r) or r.get("result", {}).get("isError"):
+    sys.exit(json.dumps(r)[:600])
+PY
+echo "playwright-mcp ok"
+ssh_run 'timeout 120 /opt/uv-tools/notebooklm-py/bin/python -' <<'PY' || fail "notebooklm: Playwright cannot start Chromium"
+from playwright.sync_api import sync_playwright
+with sync_playwright() as p:
+    for headless in (True, False):
+        b = p.chromium.launch(headless=headless)
+        page = b.new_page()
+        page.goto("data:text/html,<title>nlm-smoke</title>ok")
+        assert page.title() == "nlm-smoke"
+        b.close()
+PY
+echo "notebooklm browser ok"
 
 # Samba: share "student" is writable with the password the start shows.
 smb_pw=$(docker exec "${NAME}" cat /home/student/.clawbook/samba-password)

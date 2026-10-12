@@ -109,7 +109,12 @@ RUN curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr
  && test -x /usr/local/bin/agy
 
 # --- Further tools -----------------------------------------------------------
+# Browsers for every Playwright copy in the image live in one shared place.
+# playwright-cli and Playwright-MCP use Chrome by default, which the image
+# does not have; PLAYWRIGHT_MCP_BROWSER (read by both) switches them to the
+# Chromium that Playwright installs.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    PLAYWRIGHT_MCP_BROWSER=chromium \
     UV_TOOL_DIR=/opt/uv-tools \
     UV_TOOL_BIN_DIR=/usr/local/bin
 
@@ -117,6 +122,9 @@ ARG PLAYWRIGHT_VERSION
 ARG PLAYWRIGHT_CLI_VERSION
 ARG PLAYWRIGHT_MCP_VERSION
 ARG WIKIJS_MCP_VERSION
+# playwright-cli and Playwright-MCP bring their own playwright-core, often
+# a newer one that expects another Chromium revision: install Chromium for
+# every copy (without the extra headless shell, which they do not use).
 RUN test -n "${PLAYWRIGHT_VERSION}" -a -n "${PLAYWRIGHT_CLI_VERSION}" \
          -a -n "${PLAYWRIGHT_MCP_VERSION}" -a -n "${WIKIJS_MCP_VERSION}" \
  && npm install -g --omit=dev \
@@ -126,16 +134,37 @@ RUN test -n "${PLAYWRIGHT_VERSION}" -a -n "${PLAYWRIGHT_CLI_VERSION}" \
       "@cahaseler/wikijs-mcp@${WIKIJS_MCP_VERSION}" \
  && npm cache clean --force \
  && playwright install --with-deps chromium \
+ && find /usr/local/lib/node_modules -type f \
+      -path '*/node_modules/playwright-core/package.json' -printf '%h\n' \
+    | while read -r core; do \
+        node "${core}/cli.js" install --with-deps --no-shell chromium || exit 1; \
+      done \
  && chmod -R a+rX /opt/ms-playwright \
  && rm -rf /var/lib/apt/lists/*
 
+# notebooklm-py with its browser extra: "notebooklm login" opens Chromium
+# through the Python Playwright, pinned to a release whose Chromium is
+# already in /opt/ms-playwright.
 ARG GRAPHIFY_VERSION
 ARG NOTEBOOKLM_VERSION
+ARG PLAYWRIGHT_PYTHON_VERSION
 RUN test -n "${GRAPHIFY_VERSION}" -a -n "${NOTEBOOKLM_VERSION}" \
+         -a -n "${PLAYWRIGHT_PYTHON_VERSION}" \
  && uv tool install "graphifyy==${GRAPHIFY_VERSION}" \
- && uv tool install "notebooklm-py==${NOTEBOOKLM_VERSION}" \
+ && uv tool install "notebooklm-py[browser]==${NOTEBOOKLM_VERSION}" \
+      --with "playwright==${PLAYWRIGHT_PYTHON_VERSION}" \
+ && /opt/uv-tools/notebooklm-py/bin/python -m playwright install chromium \
  && chmod -R a+rX /opt/uv-tools \
  && uv cache clean
+
+# Every Playwright "install" (also "playwright-cli install --skills" for an
+# already present browser) takes a lock in the browser directory and notes
+# its own path under .links. Only these two places become writable for the
+# group "student"; the installed browsers stay read-only.
+RUN chgrp student /opt/ms-playwright \
+ && chgrp -R student /opt/ms-playwright/.links \
+ && chmod 2775 /opt/ms-playwright /opt/ms-playwright/.links \
+ && chmod g+w /opt/ms-playwright/.links/*
 
 # WorkspaceManager from the vendored wheel, checksum pinned in versions.env.
 # Its entry point goes to /opt/clawbook/tool-bin: /usr/local/bin/wsm is a
@@ -149,7 +178,7 @@ RUN test -n "${WSM_VERSION}" -a -n "${WSM_SHA256}" \
  && UV_TOOL_BIN_DIR=/opt/clawbook/tool-bin \
       uv tool install "/tmp/wsm/wsm-${WSM_VERSION}-py3-none-any.whl" \
  && test -x /opt/clawbook/tool-bin/wsm \
- && chmod -R a+rX /opt/uv-tools \
+ && chmod -R a+rX /opt/uv-tools/wsm \
  && rm -rf /tmp/wsm \
  && uv cache clean
 

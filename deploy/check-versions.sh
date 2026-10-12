@@ -47,5 +47,6 @@ row "Playwright MCP" "${PLAYWRIGHT_MCP_VERSION}" "$(npm_latest @playwright/mcp)"
 row "Wiki.js MCP"    "${WIKIJS_MCP_VERSION}"     "$(npm_latest @cahaseler/wikijs-mcp)"
 row "Graphify"       "${GRAPHIFY_VERSION}"       "$(pypi_latest graphifyy)"
 row "notebooklm-py"  "${NOTEBOOKLM_VERSION}"     "$(pypi_latest notebooklm-py)"
+row "Playwright (Python)" "${PLAYWRIGHT_PYTHON_VERSION}" "$(pypi_latest playwright)"
 
 exit 0

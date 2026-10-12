@@ -129,6 +129,27 @@ Administrator-Rechte.
    offenes Fenster kennt neu hinzugekommene Befehle noch
    nicht.
 
+**WSL war schon installiert und wurde nur
+aktualisiert:** War WSL auf Ihrem eigenen Rechner schon
+von früher vorhanden und haben Sie es nur mit
+`wsl --update` auf den neuen Stand gebracht, kann ein
+Windows-Feature fehlen, das clawbook braucht:
+`VirtualMachinePlatform` (in der Liste der
+Windows-Features „VM-Plattform"). `wsl --update` schaltet
+keine Windows-Features ein. Der erste Start bricht dann
+mit der Meldung `HCS_E_SERVICE_NOT_AVAILABLE` ab.
+Schalten Sie das Feature in einer PowerShell **als
+Administrator** ein:
+
+```powershell
+dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart
+```
+
+Danach **Windows neu starten** und den Befehl aus
+Abschnitt 2 erneut ausführen. Nach einer frischen
+Installation mit `wsl --install` (Schritt 1) ist das
+Feature bereits eingeschaltet.
+
 Klappt Schritt 1 nicht, weil die Virtualisierung
 ausgeschaltet ist (Meldung mit „Virtual Machine Platform"
 oder „Virtualisierung"), muss sie im BIOS/UEFI des
@@ -719,6 +740,15 @@ lesen können.
   brauchen. Folgen Sie Abschnitt 1, „WSL zu Hause
   installieren" (dort mit `--no-distribution`, das spart
   Platz; beides führt zum Ziel).
+- **Der erste Start bricht mit
+  `HCS_E_SERVICE_NOT_AVAILABLE` ab** (eigener Rechner,
+  auf dem WSL schon vorhanden war und nur mit
+  `wsl --update` aktualisiert wurde) — das
+  Windows-Feature „VirtualMachinePlatform" fehlt.
+  Einschalten als Administrator mit
+  `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`,
+  dann Windows neu starten; Einzelheiten in Abschnitt 1,
+  „WSL zu Hause installieren".
 - **„Deine WSL-Version ist zu alt: wslc …, nötig ist
   mindestens 3.0.1."** — das Skript fragt „Jetzt mit
   ‚wsl --update' aktualisieren? Das geht ohne
