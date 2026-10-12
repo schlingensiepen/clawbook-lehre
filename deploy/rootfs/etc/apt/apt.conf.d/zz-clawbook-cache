@@ -1,0 +1,12 @@
+// clawbook-lehre: apt keeps downloaded packages and its package lists in
+// the home volume (~/.clawbook/apt). After a new image "clawbook" installs
+// the packages from ~/.clawbook/stand.json again from there: no second
+// download, offline when everything is cached. Nothing cleans it up
+// automatically. The directories are created by /etc/cont-init.d/10-clawbook.
+// (Comes after the image's own apt-get runs; an apt-get in a later build
+// step would write into /home/student.)
+Dir::Cache::archives "/home/student/.clawbook/apt/archives/";
+Dir::State::lists "/home/student/.clawbook/apt/lists/";
+APT::Keep-Downloaded-Packages "true";
+Binary::apt::APT::Keep-Downloaded-Packages "true";
+APT::Periodic::AutocleanInterval "0";

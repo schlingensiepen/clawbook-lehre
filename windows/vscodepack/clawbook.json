@@ -15,7 +15,12 @@
     ]
   },
   "container": {
-    "erweiterungen": []
+    "erweiterungen": [
+      "ms-python.python",
+      "ms-python.debugpy",
+      "ms-python.vscode-pylance",
+      "charliermarsh.ruff"
+    ]
   },
   "einstellungen": {
     "update.mode": "none",

@@ -183,12 +183,20 @@ RUN test -n "${WSM_VERSION}" -a -n "${WSM_SHA256}" \
  && uv cache clean
 
 # --- Image defaults ----------------------------------------------------------
+# Also the source of the technology and course packages (clawbook-apt) with
+# its key, and the apt cache in the home volume. No apt-get after this
+# point: the build does not need the package source, and apt would now
+# write into /home/student (cont-init.d/10-clawbook prepares it at start).
 COPY deploy/rootfs/ /
 
 RUN chmod 0755 /etc/cont-init.d/10-clawbook /etc/services.d/*/run \
                /usr/local/bin/clawbook /usr/local/bin/clawbook-* \
                /usr/local/bin/notebooklm-fix-cookies /usr/local/bin/wsm \
- && chmod 0644 /etc/profile.d/zz-clawbook-menu.sh \
+ && chmod 0644 /etc/profile.d/zz-clawbook-menu.sh /usr/share/keyrings/clawbook-apt.gpg \
+               /etc/apt/sources.list.d/clawbook.sources /etc/apt/apt.conf.d/zz-clawbook-cache \
+ && install -d -m 0755 /home/student/.clawbook/apt/archives /home/student/.clawbook/apt/lists \
+ && install -d -m 0700 -o _apt -g root /home/student/.clawbook/apt/archives/partial \
+      /home/student/.clawbook/apt/lists/partial \
  && mkdir -p /run/sshd
 
 ARG CLAWBOOK_BUILD=unknown

@@ -8,8 +8,9 @@
     - Image holen, Container und Home-Volume anlegen und starten
     - SSH-Schlüssel nach Windows holen und SSH für VS Code einrichten
     - das Home sichern (mitnehmen), importieren, zurücksetzen
-    - ein portables VS Code (VSCodePack) bei Microsoft laden, einrichten
-      und mit dem Container verbinden
+    - je Kurs ein portables VS Code (VSCodePack) bei Microsoft laden,
+      einrichten und mit dem Container verbinden
+    - das Menü für Kurse und Technikpakete im Container öffnen
 
   Normalerweise startet man es über den Befehl von der Startseite des
   Repositorys; ohne Parameter erscheint ein Menü.
@@ -21,7 +22,12 @@
 
 .PARAMETER Action
   start, update, export, import, ssh, status, stop, reset, vscode,
-  vscode-install - ohne Angabe: Menü.
+  vscode-install, pakete - ohne Angabe: Menü.
+
+.PARAMETER Kurs
+  Kennung eines VSCodePacks für -Action vscode bzw. vscode-install
+  (z. B. kurs-inf; clawbook = Grundpack). Ohne Angabe: vscode fragt bei
+  mehreren Packs nach, vscode-install richtet alle passend zum Container ein.
 
 .PARAMETER Image
   Image, Vorgabe ghcr.io/schlingensiepen/clawbook-lehre:latest
@@ -34,10 +40,12 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPositionalParameters', '')]
 [CmdletBinding()]
 param(
-  [ValidateSet('', 'start', 'update', 'export', 'import', 'ssh', 'status', 'stop', 'reset', 'vscode', 'vscode-install')]
+  [ValidateSet('', 'start', 'update', 'export', 'import', 'ssh', 'status', 'stop', 'reset', 'vscode', 'vscode-install', 'pakete')]
   [string]$Action = '',
   [string]$Image = 'ghcr.io/schlingensiepen/clawbook-lehre:latest',
-  [string]$File = ''
+  [string]$File = '',
+  [ValidatePattern('(?-i)^$|^[a-z0-9][a-z0-9-]{0,63}$')]
+  [string]$Kurs = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,11 +72,17 @@ $KnownHosts = Join-Path $SshDir 'known_hosts_clawbook'
 $MarkBegin = '# >>> clawbook (verwaltet von clawbook.ps1 - nicht von Hand aendern)'
 $MarkEnd = '# <<< clawbook'
 
-# VSCodePack: portable VS Code per course id (DEC-054). The course
-# description comes from the product repository for now; course packages
-# will provide it from inside the container later.
+# VSCodePack: one portable VS Code per installed course plus the base pack
+# "clawbook" (DEC-054, DEC-060). The course description comes from the CLI
+# in the container; the base pack falls back to the product repository.
 $PackRoot = Join-Path $AppDir 'vscode'
+# Former single course id (DEC-054); no longer used and removed on start.
 $CourseFile = Join-Path $AppDir 'kurs.txt'
+# Id of the pack started last (default in the selection of menu [9]).
+$LastPackFile = Join-Path $PackRoot 'zuletzt.txt'
+# One VS Code download per version, shared by all packs of one run.
+$DownloadDir = Join-Path $PackRoot '_download'
+$PackIdPattern = '^[a-z0-9][a-z0-9-]{0,63}$'
 $DefaultCourse = 'clawbook'
 $DefaultFolder = '/home/student/source'
 # Branch or tag for raw downloads (tests); checked in the main part.
@@ -77,11 +91,22 @@ $RawBase = "https://raw.githubusercontent.com/schlingensiepen/clawbook-lehre/$Re
 $CourseWebBase = "$RawBase/windows/vscodepack"
 $VsCodeApi = 'https://update.code.visualstudio.com/api/update/win32-x64-archive/stable/latest'
 $VsCodeLatest = 'https://update.code.visualstudio.com/latest/win32-x64-archive/stable'
-$ShortcutName = 'clawbook VS Code.lnk'
+$ShortcutBase = 'clawbook VS Code'
+$StartMenuDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+# Longest wait for the package restore in the container (after an update
+# or import) before VS Code starts anyway.
+$RestoreWaitMinutes = 10
+$RestoreWaited = $false
+$PacksSynced = $false
+$LeaveMenu = $false
 
 # Lowest interface version of the CLI "clawbook" in the container this
 # script uses; older images get the old way and a hint to update.
+# Interface 1 (0.7): status, key show, stand. Interface 2 (0.9): kurse,
+# merged "kurs vscode", pakete, status with wiederherstellung; the course
+# packs need it, older images only get the base pack.
 $MinInterface = 1
+$MinInterfaceCourses = 2
 $OldImageHinted = $false
 
 # Shown whenever the container does not come up in time.
@@ -411,10 +436,24 @@ function ConvertFrom-CliJson([string]$Text) {
   catch { Log ("JSON nicht lesbar: {0}" -f $_.Exception.Message); return $null }
 }
 
+# All calls of the CLI that the VSCodePacks depend on are in the functions
+# Invoke-ClawbookCli, Get-CliStatus, Get-ContainerCourses,
+# Get-CourseJsonFromContainer, Get-RestoreState and Invoke-ContainerMenu,
+# so a change of the CLI interface stays local.
+function Invoke-ClawbookCli([string[]]$CliArgs) {
+  # Runs "clawbook <args>" as root in the container with UTF-8 output
+  # (course titles); returns @{ Code; Out }.
+  $enc = $null
+  try { $enc = [Console]::OutputEncoding; [Console]::OutputEncoding = $Utf8NoBom } catch { $enc = $null }
+  try { $r = Invoke-Wslc exec $Container clawbook @CliArgs }
+  finally { if ($enc) { try { [Console]::OutputEncoding = $enc } catch { $null = $_ } } }
+  return $r
+}
+
 function Get-CliStatus {
   # "clawbook status --json" of the running container, or $null for an
   # image without the CLI or with an older interface.
-  $r = Invoke-Wslc exec $Container clawbook status --json
+  $r = Invoke-ClawbookCli @('status', '--json')
   if ($r.Code -ne 0) { return $null }
   $s = ConvertFrom-CliJson $r.Out
   if (-not $s -or -not ($s.PSObject.Properties.Name -contains 'schnittstelle')) { return $null }
@@ -426,6 +465,152 @@ function Show-OldImageHint {
   if ($script:OldImageHinted) { return }
   $script:OldImageHinted = $true
   Say 'Hinweis: Das Image im Container ist älter als dieses Skript. Aktualisiere es mit Menüpunkt [2].' 'Yellow'
+}
+
+function Test-WslcAvailable {
+  return [bool](Get-Command $WslcPath -ErrorAction SilentlyContinue)
+}
+
+function ConvertFrom-CliJsonList([string]$Text, [string]$Property) {
+  # A JSON list from wslc output: either a bare array or an object with the
+  # list in $Property. Returns the entries, or $null if nothing readable.
+  if (-not $Text) { return $null }
+  $a = $Text.IndexOf('['); $o = $Text.IndexOf('{')
+  if ($a -ge 0 -and ($o -lt 0 -or $a -lt $o)) {
+    $end = $Text.LastIndexOf(']')
+    if ($end -le $a) { return $null }
+    try { $list = $Text.Substring($a, $end - $a + 1) | ConvertFrom-Json }
+    catch { Log ("JSON nicht lesbar: {0}" -f $_.Exception.Message); return $null }
+    # Windows PowerShell 5.1 returns a JSON array as one object: unroll it.
+    # The comma keeps an empty list from turning into $null.
+    return , @(foreach ($e in $list) { $e })
+  }
+  $obj = ConvertFrom-CliJson $Text
+  if (-not $obj -or -not ($obj.PSObject.Properties.Name -contains $Property)) { return $null }
+  return , @(foreach ($e in $obj.$Property) { $e })
+}
+
+function Get-ContainerCourses {
+  # Courses installed in the container ("clawbook kurse --json"), without
+  # the base pack. Returns @{ Ok; Reason = '', 'stopped' or 'old';
+  # Courses = @(@{ Id; Title }) }.
+  if (-not (Test-WslcAvailable) -or -not (Get-State).Running) { return @{ Ok = $false; Reason = 'stopped'; Courses = @() } }
+  $cli = Get-CliStatus
+  if (-not $cli -or [int]$cli.schnittstelle -lt $MinInterfaceCourses) { return @{ Ok = $false; Reason = 'old'; Courses = @() } }
+  $r = Invoke-ClawbookCli @('kurse', '--json')
+  $list = if ($r.Code -eq 0) { ConvertFrom-CliJsonList $r.Out 'kurse' } else { $null }
+  if ($null -eq $list) { return @{ Ok = $false; Reason = 'old'; Courses = @() } }
+  $courses = @(foreach ($e in $list) {
+      $id = "$($e.kennung)"
+      if ($id -cnotmatch $PackIdPattern -or $id -eq $DefaultCourse) { continue }
+      $title = if ($e.titel) { "$($e.titel)" } else { $id }
+      @{ Id = $id; Title = $title }
+    })
+  Log ("Kurse im Container: {0}" -f (($courses | ForEach-Object { $_.Id }) -join ', '))
+  return @{ Ok = $true; Reason = ''; Courses = $courses }
+}
+
+function Get-CourseJsonFromContainer([string]$Id) {
+  # Merged course description ("clawbook kurs vscode <id> --json") as JSON
+  # text; $null if the container does not run or cannot provide it.
+  if (-not (Test-WslcAvailable) -or -not (Get-State).Running -or -not (Get-CliStatus)) { return $null }
+  $r = Invoke-ClawbookCli @('kurs', 'vscode', $Id, '--json')
+  if ($r.Code -ne 0) { return $null }
+  $start = $r.Out.IndexOf('{'); $end = $r.Out.LastIndexOf('}')
+  if ($start -lt 0 -or $end -le $start) { return $null }
+  return $r.Out.Substring($start, $end - $start + 1)
+}
+
+function Get-RestoreState {
+  # Package restore after an update or import: 'running', 'done', 'failed',
+  # 'unknown' (status not readable, e.g. a wslc hiccup) or '' (no restore
+  # field: older image).
+  $s = Get-CliStatus
+  if (-not $s) { return 'unknown' }
+  if (-not ($s.PSObject.Properties.Name -contains 'wiederherstellung')) { return '' }
+  $v = "$($s.wiederherstellung)".Trim()
+  # "läuft" may arrive with a broken umlaut, so compare loosely.
+  if ($v -like 'l*uft') { return 'running' }
+  if ($v -eq 'fertig') { return 'done' }
+  if ($v -eq 'fehler') { return 'failed' }
+  return ''
+}
+
+function Test-KeyPressed {
+  # True (and the key consumed) if a key was pressed; never blocks.
+  try {
+    if ([Console]::IsInputRedirected) { return $false }
+    if ([Console]::KeyAvailable) { $null = [Console]::ReadKey($true); return $true }
+  } catch { $null = $_ }
+  return $false
+}
+
+function Clear-KeyBuffer {
+  # Drops keys typed before (e.g. Enter from the menu), so they do not end
+  # the wait at once.
+  try {
+    if ([Console]::IsInputRedirected) { return }
+    while ([Console]::KeyAvailable) { $null = [Console]::ReadKey($true) }
+  } catch { $null = $_ }
+}
+
+function Wait-Restore {
+  # Waits while the container restores its packages, so VS Code does not
+  # start (or a pack is not set up) before they are there. Returns $true
+  # if the restore is not running (any more).
+  if ($script:RestoreWaited) { return ((Get-RestoreState) -ne 'running') }
+  $script:RestoreWaited = $true
+  $state = Get-RestoreState
+  if ($state -eq 'running') {
+    Say ('Im Container werden gerade die Kurse und Technikpakete wiederhergestellt (nach einer Aktualisierung oder einem Import). ' +
+      'Ich warte, bis das fertig ist – höchstens {0} Minuten.' -f $RestoreWaitMinutes) 'Cyan'
+    Say 'Mit einer beliebigen Taste brechen Sie das Warten ab.' 'Cyan'
+    $deadline = (Get-Date).AddMinutes($RestoreWaitMinutes)
+    $aborted = $false
+    Clear-KeyBuffer
+    while ($state -eq 'running' -and (Get-Date) -lt $deadline) {
+      for ($i = 0; $i -lt 10 -and -not $aborted; $i++) {
+        if (Test-KeyPressed) { $aborted = $true } else { Start-Sleep -Milliseconds 500 }
+      }
+      if ($aborted) { break }
+      Write-Host -NoNewline '.'
+      # An unreadable status is no sign of the end: keep waiting.
+      $next = Get-RestoreState
+      if ($next -ne 'unknown') { $state = $next }
+    }
+    Write-Host ''
+    if ($state -eq 'running') {
+      Say ('Die Wiederherstellung läuft im Hintergrund weiter. Es geht trotzdem weiter; bis sie fertig ist, fehlen im Container noch Werkzeuge. ' +
+        'Fehlen danach Erweiterungen in VS Code, richten Sie die VSCodePacks mit Menüpunkt [10] erneut ein.') 'Yellow'
+      return $false
+    }
+    if ($state -eq 'done') { Say 'Die Kurse und Technikpakete sind wiederhergestellt.' 'Green' }
+  }
+  if ($state -eq 'failed') {
+    Say 'Hinweis: Die Wiederherstellung der Kurse und Technikpakete im Container ist fehlgeschlagen. Prüfen Sie sie mit Menüpunkt [11].' 'Yellow'
+  }
+  return $true
+}
+
+function Invoke-ContainerMenu {
+  # Menu [11] and -Action pakete: the menu for courses and technology
+  # packages lives only in the container ("clawbook pakete"); the terminal
+  # is passed through. Afterwards the packs are matched to the courses.
+  if (-not (Get-State).Running) {
+    Say 'Der Container läuft nicht – ich starte ihn zuerst.' 'Yellow'
+    Start-Clawbook
+  }
+  $info = Get-ContainerCourses
+  if (-not $info.Ok) {
+    Show-OldImageHint
+    Say 'Das Menü für Kurse und Technikpakete gibt es erst mit einem neueren Image.' 'Yellow'
+    return
+  }
+  # Start-Process without a new window hands the console (terminal) through.
+  $null = Invoke-Visible $WslcPath @('exec', '-it', $Container, 'clawbook', 'pakete')
+  Write-Host ''
+  $script:PacksSynced = $false
+  Sync-Packs
 }
 
 function Save-Stand {
@@ -641,12 +826,16 @@ function Show-BackupStand($Stand) {
       [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime().ToString('dd.MM.yyyy HH:mm')
   } catch { $null = $_ }
   $build = if ($Stand.build -and $Stand.build.commit) { "$($Stand.build.commit)" } else { 'unbekannt' }
-  $id = if ($Stand.kennung) { "$($Stand.kennung)" } else { 'unbekannt' }
+  # Stand format 2 lists the courses ("kurse"), format 1 one id ("kennung").
+  $courses = @($Stand.kurse | Where-Object { $_ } | ForEach-Object { if ($_.kennung) { "$($_.kennung)" } else { "$_" } })
+  $id = if ($courses.Count -gt 0) { $courses -join ', ' } elseif ($Stand.kennung) { "$($Stand.kennung)" } else { 'unbekannt' }
   $packages = @($Stand.pakete | Where-Object { $_ } | ForEach-Object { '{0} {1}' -f $_.name, $_.version })
   Say 'Stand der Sicherung:'
   Say ("  Datum:    {0}" -f $date)
   Say ("  Build:    {0}" -f $build)
-  Say ("  Kennung:  {0}" -f $id)
+  if ($courses.Count -gt 0) { Say ("  Kurse:    {0}" -f $id) }
+  elseif ($Stand.kennung) { Say ("  Kennung:  {0}" -f $id) }
+  else { Say '  Kurse:    keine' }
   Say ("  Pakete:   {0}" -f $(if ($packages.Count -gt 0) { $packages -join ', ' } else { 'keine' }))
 }
 
@@ -770,18 +959,6 @@ function Enable-Tls12 {
   } catch { $null = $_ }
 }
 
-function Get-CourseId {
-  # Course id remembered in kurs.txt; "clawbook" means: no course.
-  $id = ''
-  if (Test-Path -LiteralPath $CourseFile) { $id = ([IO.File]::ReadAllText($CourseFile)).Trim() }
-  if ($id -notmatch '^[a-z0-9][a-z0-9-]{0,63}$') { $id = $DefaultCourse }
-  return $id
-}
-
-function Set-CourseId([string]$Id) {
-  [IO.File]::WriteAllText($CourseFile, "$Id`r`n", $Utf8NoBom)
-}
-
 function Get-CourseDir([string]$Id) { return (Join-Path $PackRoot $Id) }
 
 function Get-CourseJsonFromWeb([string]$Id) {
@@ -796,20 +973,33 @@ function Get-CourseJsonFromWeb([string]$Id) {
 }
 
 # Sources for the course description, tried in order; each returns the JSON
-# text or throws. Later a source reading the course package inside the
-# container (/usr/share/clawbook/kurse/<id>/vscode.json) goes in front.
+# text, $null or throws. The container (installed course packages) comes
+# first; the product repository only knows the base pack.
 $CourseSources = @(
-  @{ Name = 'GitHub'; Get = { param($Id) Get-CourseJsonFromWeb $Id } }
+  @{ Name = 'Container'; Get = { param($Id) Get-CourseJsonFromContainer $Id } },
+  @{ Name = 'GitHub'; Get = { param($Id) if ($Id -eq $DefaultCourse) { Get-CourseJsonFromWeb $Id } } }
 )
 
+function Skip-Course([string]$Id, [string]$Reason) {
+  # A faulty description of the base pack ends the script; a faulty course
+  # is only skipped, so the other packs still get set up.
+  if ($Id -eq $DefaultCourse) { Fail $Reason }
+  Say ('{0} Das VSCodePack „{1}“ wird übersprungen.' -f $Reason, $Id) 'Yellow'
+}
+
 function ConvertFrom-CourseJson([string]$Text, [string]$Id) {
-  # Parses and checks a course description (format 1); returns a hashtable.
+  # Parses and checks a course description (format 1); returns a
+  # hashtable, or $null for a faulty course description (see Skip-Course).
   try { $d = $Text.TrimStart([char]0xFEFF) | ConvertFrom-Json }
-  catch { Fail ('Die Kursbeschreibung für „{0}“ ist fehlerhaft (kein gültiges JSON).' -f $Id) }
+  catch { Skip-Course $Id ('Die Kursbeschreibung für „{0}“ ist fehlerhaft (kein gültiges JSON).' -f $Id); return $null }
   if ("$($d.format)" -ne '1') {
-    Fail ('Die Kursbeschreibung für „{0}“ hat das Format {1}; dieses Skript kennt nur Format 1. Hole dir das neueste Skript mit dem Befehl von der Startseite.' -f $Id, $d.format)
+    Skip-Course $Id ('Die Kursbeschreibung für „{0}“ hat das Format {1}; dieses Skript kennt nur Format 1. Hole dir das neueste Skript mit dem Befehl von der Startseite.' -f $Id, $d.format)
+    return $null
   }
-  if ("$($d.kennung)" -ne $Id) { Fail ('Die Kursbeschreibung passt nicht zur Kennung „{0}“ (sie nennt „{1}“).' -f $Id, $d.kennung) }
+  if ("$($d.kennung)" -ne $Id) {
+    Skip-Course $Id ('Die Kursbeschreibung passt nicht zur Kennung „{0}“ (sie nennt „{1}“).' -f $Id, $d.kennung)
+    return $null
+  }
   $folder = "$($d.ordner)"
   if ($folder -notmatch '^/[A-Za-z0-9._/-]*$') { $folder = $DefaultFolder }
   $win = @(); $cont = @()
@@ -818,7 +1008,8 @@ function ConvertFrom-CourseJson([string]$Text, [string]$Id) {
   # Extension ids end up on a cmd.exe command line: allow only plain ids.
   foreach ($e in @($win + $cont)) {
     if ($e -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9.-]*(@[A-Za-z0-9.-]+)?$') {
-      Fail ('Die Kursbeschreibung für „{0}“ enthält eine ungültige Erweiterung: {1}' -f $Id, $e)
+      Skip-Course $Id ('Die Kursbeschreibung für „{0}“ enthält eine ungültige Erweiterung: {1}' -f $Id, $e)
+      return $null
     }
   }
   $settings = [ordered]@{}
@@ -843,6 +1034,8 @@ function Read-CourseDescription([string]$Id, [switch]$PreferCache) {
   }
   if ($text) {
     $course = ConvertFrom-CourseJson $text $Id
+    # A faulty description is not kept and does not replace a good copy.
+    if (-not $course) { return $null }
     New-Item -ItemType Directory -Force -Path (Get-CourseDir $Id) | Out-Null
     [IO.File]::WriteAllText($cache, $text, $Utf8NoBom)
     return $course
@@ -1170,81 +1363,185 @@ function Set-PackSettings($Pack, $Course) {
   Log "settings.json gesetzt: $(@($values.Keys) -join ', ')"
 }
 
-function Set-PackShortcut($Pack) {
-  # Start menu entry of the current user; no administrator rights needed.
-  # It runs this script with -Action vscode, so the container starts first.
-  # Normal window: questions and error messages stay visible.
+function Get-PackTitle([string]$Id) {
+  # Title from the course description kept next to the pack; the id if none.
+  $cache = Join-Path (Get-CourseDir $Id) 'vscode.json'
+  if (Test-Path -LiteralPath $cache) {
+    try {
+      $d = ([IO.File]::ReadAllText($cache)).TrimStart([char]0xFEFF) | ConvertFrom-Json
+      if ($d.titel) { return "$($d.titel)" }
+    } catch { Log ("Titel aus {0}: {1}" -f $cache, $_.Exception.Message) }
+  }
+  return $Id
+}
+
+function Get-InstalledPacks {
+  # All packs with a usable VS Code: Id, Title, Version and Path of the
+  # newest version; the base pack first.
+  if (-not (Test-Path -LiteralPath $PackRoot)) { return @() }
+  $list = foreach ($d in @(Get-ChildItem -LiteralPath $PackRoot -Directory)) {
+    if ($d.Name -cnotmatch $PackIdPattern) { continue }
+    $v = @(Get-PackVersions $d.Name)
+    if ($v.Count -eq 0) { continue }
+    [pscustomobject]@{ Id = $d.Name; Title = (Get-PackTitle $d.Name); Version = $v[0].Version; Path = $v[0].Path }
+  }
+  return @($list | Sort-Object @{ Expression = { $_.Id -ne $DefaultCourse } }, Id)
+}
+
+function Get-LastPack {
+  # Id of the pack started last, '' if unknown.
   try {
-    $dir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    if (Test-Path -LiteralPath $LastPackFile) {
+      $id = ([IO.File]::ReadAllText($LastPackFile)).Trim()
+      if ($id -cmatch $PackIdPattern) { return $id }
+    }
+  } catch { $null = $_ }
+  return ''
+}
+
+function Get-ShortcutOwner([string]$Path) {
+  # Pack id a start menu entry of this script starts; entries without -Kurs
+  # (before DEC-060) belong to the base pack. '' for a foreign entry.
+  try {
+    $a = "$((New-Object -ComObject WScript.Shell).CreateShortcut($Path).Arguments)"
+  } catch { return '' }
+  if ($a -notmatch '-Action\s+vscode(\s|$)') { return '' }
+  if ($a -match '-Kurs\s+"?([a-z0-9][a-z0-9-]*)') { return $Matches[1] }
+  return $DefaultCourse
+}
+
+function Get-ShortcutName([string]$Id, [string]$Title) {
+  # "clawbook VS Code" for the base pack, "clawbook VS Code – <title>"
+  # otherwise; the id is added when another pack already uses that name.
+  if ($Id -eq $DefaultCourse) { return "$ShortcutBase.lnk" }
+  $t = (($Title -replace '[\\/:*?"<>|\x00-\x1f]', ' ') -replace '\s+', ' ').Trim().TrimEnd('.')
+  if (-not $t) { $t = $Id }
+  $name = '{0} – {1}.lnk' -f $ShortcutBase, $t
+  $path = Join-Path $StartMenuDir $name
+  if ((Test-Path -LiteralPath $path) -and (Get-ShortcutOwner $path) -ne $Id) {
+    $name = '{0} – {1} ({2}).lnk' -f $ShortcutBase, $t, $Id
+  }
+  return $name
+}
+
+function Get-PackShortcuts([string]$Id) {
+  # Start menu entries of this script that start the pack $Id.
+  $found = @()
+  if (-not (Test-Path -LiteralPath $StartMenuDir)) { return $found }
+  foreach ($f in @(Get-ChildItem -LiteralPath $StartMenuDir -Filter "$ShortcutBase*.lnk" -ErrorAction SilentlyContinue)) {
+    if ((Get-ShortcutOwner $f.FullName) -eq $Id) { $found += $f.FullName }
+  }
+  return $found
+}
+
+function Set-PackShortcut($Pack, $Course) {
+  # Start menu entry of the current user; no administrator rights needed.
+  # It runs this script with -Action vscode -Kurs <id>, so the container
+  # starts first. Normal window: questions and error messages stay visible.
+  $name = Get-ShortcutName $Course.Id $Course.Title
+  try {
+    New-Item -ItemType Directory -Force -Path $StartMenuDir | Out-Null
+    $path = Join-Path $StartMenuDir $name
+    # An entry under a former title of the same pack goes away.
+    foreach ($old in @(Get-PackShortcuts $Course.Id)) {
+      if ($old -ne $path) { Remove-Item -Force -LiteralPath $old -ErrorAction SilentlyContinue }
+    }
     $ps = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $script = Join-Path $AppDir 'clawbook.ps1'
-    $sc = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $dir $ShortcutName))
+    $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
     $sc.TargetPath = $ps
-    $sc.Arguments = ConvertTo-ArgumentString @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script, '-Action', 'vscode')
+    $sc.Arguments = ConvertTo-ArgumentString @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script, '-Action', 'vscode', '-Kurs', $Course.Id)
     $sc.WorkingDirectory = $AppDir
     $sc.WindowStyle = 1
     $sc.IconLocation = (Join-Path $Pack 'Code.exe') + ',0'
-    $sc.Description = 'clawbook starten und VS Code (VSCodePack) verbinden'
+    $sc.Description = ('clawbook starten und VS Code (VSCodePack) verbinden: {0}' -f $Course.Title)
     $sc.Save()
-    Say 'Verknüpfung „clawbook VS Code“ im Startmenü angelegt. Sie startet zuerst den Container und dann VS Code.' 'Green'
+    Say ('Verknüpfung „{0}“ im Startmenü angelegt. Sie startet zuerst den Container und dann VS Code.' -f ($name -replace '\.lnk$', '')) 'Green'
   } catch {
     Log ("Verknüpfung: {0}" -f $_.Exception.Message)
     Say 'Die Verknüpfung im Startmenü ließ sich nicht anlegen. Starte VS Code dann über Menüpunkt [9].' 'Yellow'
   }
 }
 
-function Install-VsCodePack([switch]$StartFollows) {
-  # Menu [10] and -Action vscode-install. -StartFollows: VS Code starts
-  # right afterwards, so the hint on how to start it is left out.
-  $id = Get-CourseId
-  $course = Read-CourseDescription $id
-  if (-not $course) { Fail ('Die Kursbeschreibung für „{0}“ ließ sich nicht laden. Prüfe deine Internetverbindung und versuche es dann erneut.' -f $id) }
-  Set-CourseId $id
-  Say ("VSCodePack für: {0} (Kennung {1})" -f $course.Title, $id) 'Cyan'
-  $dir = Get-CourseDir $id
+function Clear-VsCodeDownload {
+  if (Test-Path -LiteralPath $DownloadDir) { Remove-Item -Recurse -Force -LiteralPath $DownloadDir -ErrorAction SilentlyContinue }
+}
+
+function Get-VsCodeZip($Latest) {
+  # Downloads the VS Code ZIP once per version into the shared download
+  # folder and checks it; further packs of the same run reuse it. Returns
+  # the path of the checked file.
+  New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
+  $zip = Join-Path $DownloadDir ("VSCode-win32-x64-{0}.zip" -f $Latest.Version)
+  foreach ($o in @(Get-ChildItem -LiteralPath $DownloadDir -File | Where-Object { $_.FullName -ne $zip })) {
+    Remove-Item -Force -LiteralPath $o.FullName -ErrorAction SilentlyContinue
+  }
+  if (Test-Path -LiteralPath $zip) {
+    Say ("[1/4] VS Code {0} ist schon heruntergeladen." -f $Latest.Version) 'Cyan'
+  } else {
+    Say ("[1/4] Lade VS Code {0} direkt bei Microsoft (etwa 150 MB)." -f $Latest.Version) 'Cyan'
+    Say 'Das dauert je nach Verbindung ein bis zehn Minuten – bitte nicht abbrechen und das Fenster offen lassen.' 'Cyan'
+    $part = "$zip.part"
+    if (-not (Save-Download $Latest.Url $part) -or -not (Test-Path -LiteralPath $part)) {
+      Remove-Item -Force -LiteralPath $part -ErrorAction SilentlyContinue
+      Fail 'Der Download von VS Code ist fehlgeschlagen. Prüfe deine Internetverbindung und versuche es dann erneut.'
+    }
+    Move-Item -LiteralPath $part -Destination $zip
+  }
+  Say '[2/4] Prüfe die heruntergeladene Datei ...' 'Cyan'
+  if ($Latest.Sha256) {
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
+    if ($hash -ne $Latest.Sha256) {
+      Log "SHA-256 erwartet $($Latest.Sha256), erhalten $hash"
+      Remove-Item -Force -LiteralPath $zip -ErrorAction SilentlyContinue
+      Fail 'Die heruntergeladene Datei ist beschädigt (die Prüfsumme stimmt nicht). Ich habe sie gelöscht. Versuche es erneut.'
+    }
+  } else {
+    Log 'Keine Prüfsumme verfügbar (Rückfall-Weg); es bleibt die Signaturprüfung.'
+  }
+  return $zip
+}
+
+function Install-VsCodePack([string]$Id, $Latest = $null, [switch]$StartFollows) {
+  # Sets up or updates the pack $Id. $Latest: VS Code version the caller
+  # looked up (several packs in one run share one download). -StartFollows:
+  # VS Code starts (or more packs follow) right afterwards, so the hint on
+  # how to start it is left out. Returns $true if the pack is ready.
+  $course = Read-CourseDescription $Id
+  if (-not $course) {
+    if ($Id -eq $DefaultCourse) {
+      Fail ('Die Kursbeschreibung für „{0}“ ließ sich nicht laden. Prüfe deine Internetverbindung und versuche es dann erneut.' -f $Id)
+    }
+    Say ('Für den Kurs „{0}“ gibt es keine brauchbare Beschreibung aus dem Container. Dieses VSCodePack wird übersprungen. Ist der Kurs im Container installiert (Menüpunkt [11])?' -f $Id) 'Yellow'
+    return $false
+  }
+  Say ("VSCodePack für: {0} (Kennung {1})" -f $course.Title, $Id) 'Cyan'
+  $dir = Get-CourseDir $Id
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
 
-  Say 'Prüfe bei Microsoft, welche VS-Code-Version die neueste ist ...'
-  $latest = Get-LatestVsCode
-  if (-not $latest) { Fail 'Ich konnte bei Microsoft nicht nachsehen, welche VS-Code-Version die neueste ist. Prüfe deine Internetverbindung und versuche es dann erneut.' }
-  $installed = @(Get-PackVersions $id)
-  $target = Join-Path $dir ("vscode-{0}" -f $latest.Version)
+  $ownLatest = -not $Latest
+  if ($ownLatest) {
+    Say 'Prüfe bei Microsoft, welche VS-Code-Version die neueste ist ...'
+    $Latest = Get-LatestVsCode
+    if (-not $Latest) { Fail 'Ich konnte bei Microsoft nicht nachsehen, welche VS-Code-Version die neueste ist. Prüfe deine Internetverbindung und versuche es dann erneut.' }
+  }
+  $installed = @(Get-PackVersions $Id)
+  $target = Join-Path $dir ("vscode-{0}" -f $Latest.Version)
   $previous = @($installed | Where-Object { $_.Path -ne $target } | Select-Object -First 1)
   $prevPath = if ($previous.Count -gt 0) { $previous[0].Path } else { '' }
 
   if (Test-Path -LiteralPath (Join-Path $target 'Code.exe')) {
-    Say ("VS Code {0} ist schon installiert und aktuell. Ich gleiche nur Erweiterungen und Einstellungen ab." -f $latest.Version) 'Green'
+    Say ("VS Code {0} ist schon installiert und aktuell. Ich gleiche nur Erweiterungen und Einstellungen ab." -f $Latest.Version) 'Green'
   } else {
-    if (Test-PackRunning $id) { Fail 'VS Code aus dem VSCodePack läuft noch. Schließe alle VS-Code-Fenster und versuche es dann erneut.' }
-    Remove-OldPacks $id
+    if (Test-PackRunning $Id) { Fail 'VS Code aus dem VSCodePack läuft noch. Schließe alle VS-Code-Fenster und versuche es dann erneut.' }
+    Remove-OldPacks $Id
     $free = Get-FreeBytes $dir
     if ($free -ge 0 -and $free -lt 1GB) {
       Fail ("Zu wenig Platz in {0}: VS Code braucht etwa 1 GB, frei sind {1:N1} GB. Schaffe Platz und versuche es dann erneut." -f $dir, ($free / 1GB))
     }
-    $zip = Join-Path $dir ("VSCode-win32-x64-{0}.zip" -f $latest.Version)
     $tmp = "$target.tmp"
-    Remove-Item -Force -LiteralPath $zip -ErrorAction SilentlyContinue
-
-    if ($prevPath) { Say ("Installiert ist VS Code {0}; neu ist {1}." -f $installed[0].Version, $latest.Version) }
-    Say ("[1/4] Lade VS Code {0} direkt bei Microsoft (etwa 150 MB)." -f $latest.Version) 'Cyan'
-    Say 'Das dauert je nach Verbindung ein bis zehn Minuten – bitte nicht abbrechen und das Fenster offen lassen.' 'Cyan'
-    if (-not (Save-Download $latest.Url $zip) -or -not (Test-Path -LiteralPath $zip)) {
-      Remove-Item -Force -LiteralPath $zip -ErrorAction SilentlyContinue
-      Fail 'Der Download von VS Code ist fehlgeschlagen. Prüfe deine Internetverbindung und versuche es dann erneut.'
-    }
-
-    Say '[2/4] Prüfe die heruntergeladene Datei ...' 'Cyan'
-    if ($latest.Sha256) {
-      $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
-      if ($hash -ne $latest.Sha256) {
-        Log "SHA-256 erwartet $($latest.Sha256), erhalten $hash"
-        Remove-Item -Force -LiteralPath $zip -ErrorAction SilentlyContinue
-        Fail 'Die heruntergeladene Datei ist beschädigt (die Prüfsumme stimmt nicht). Ich habe sie gelöscht. Versuche es erneut.'
-      }
-    } else {
-      Log 'Keine Prüfsumme verfügbar (Rückfall-Weg); es bleibt die Signaturprüfung.'
-    }
+    if ($prevPath) { Say ("Installiert ist VS Code {0}; neu ist {1}." -f $installed[0].Version, $Latest.Version) }
+    $zip = Get-VsCodeZip $Latest
 
     Say '[3/4] Entpacke VS Code. Das dauert ein bis drei Minuten ...' 'Cyan'
     $prev = $ProgressPreference; $ProgressPreference = 'SilentlyContinue'
@@ -1252,81 +1549,302 @@ function Install-VsCodePack([switch]$StartFollows) {
     catch {
       Log ("Entpacken: {0}" -f $_.Exception.Message)
       Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+      Remove-Item -Force -LiteralPath $zip -ErrorAction SilentlyContinue
       Fail 'Das Entpacken von VS Code ist fehlgeschlagen. Einzelheiten stehen im Protokoll.'
     } finally {
       $ProgressPreference = $prev
-      Remove-Item -Force -LiteralPath $zip -ErrorAction SilentlyContinue
     }
     $exe = Join-Path $tmp 'Code.exe'
     if (-not (Test-Path -LiteralPath $exe) -or -not (Test-MicrosoftSignature $exe)) {
       Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+      Remove-Item -Force -LiteralPath $zip -ErrorAction SilentlyContinue
       Fail 'Code.exe trägt keine gültige Signatur von Microsoft. Ich habe die entpackten Dateien wieder gelöscht. Versuche es später erneut.'
     }
     Rename-Item -LiteralPath $tmp -NewName (Split-Path -Leaf $target)
     Say '[4/4] Richte VS Code ein ...' 'Cyan'
   }
 
-  if (Test-PackRunning $id) {
+  if (Test-PackRunning $Id) {
     Say 'Hinweis: VS Code aus dem VSCodePack läuft gerade. Neue Einstellungen wirken nach einem Neustart von VS Code.' 'Yellow'
   }
   Move-PackData $target $prevPath
   $failed = Install-PackExtensions $target $course.Windows
   Set-PackSettings $target $course
-  Remove-OldPacks $id
-  Set-PackShortcut $target
+  Remove-OldPacks $Id
+  Set-PackShortcut $target $course
+  if ($ownLatest) { Clear-VsCodeDownload }
   if ($failed -gt 0) {
     Say 'Nicht alle Erweiterungen ließen sich installieren. Wähle später noch einmal Menüpunkt [10].' 'Yellow'
   }
-  Say ("VSCodePack bereit: VS Code {0} in {1}" -f $latest.Version, $target) 'Green'
+  Say ("VSCodePack bereit: VS Code {0} in {1}" -f $Latest.Version, $target) 'Green'
   if (-not $StartFollows) {
-    Say 'Starten mit Menüpunkt [9] oder über „clawbook VS Code“ im Startmenü.' 'Green'
+    Say ('Starten mit Menüpunkt [9] oder über „{0}“ im Startmenü.' -f ((Get-ShortcutName $Id $course.Title) -replace '\.lnk$', '')) 'Green'
+  }
+  return $true
+}
+
+function Remove-Pack([string]$Id) {
+  # Removes a pack completely: all versions, its data (extensions and
+  # settings) and its start menu entry. Returns $true on success.
+  if (Test-PackRunning $Id) {
+    Say 'VS Code aus diesem VSCodePack läuft noch. Schließen Sie alle Fenster dieses VS Code und versuchen Sie es dann erneut.' 'Yellow'
+    return $false
+  }
+  foreach ($l in @(Get-PackShortcuts $Id)) { Remove-Item -Force -LiteralPath $l -ErrorAction SilentlyContinue }
+  try { Remove-Item -Recurse -Force -LiteralPath (Get-CourseDir $Id) }
+  catch {
+    Log ("Pack entfernen {0}: {1}" -f $Id, $_.Exception.Message)
+    Say ('Das VSCodePack „{0}“ ließ sich nicht ganz entfernen. Schließen Sie alle VS-Code-Fenster und versuchen Sie es dann erneut.' -f $Id) 'Yellow'
+    return $false
+  }
+  Say ('Das VSCodePack „{0}“ ist entfernt.' -f $Id) 'Green'
+  return $true
+}
+
+function Remove-OrphanPacks($Courses) {
+  # Offers to remove packs whose course is no longer in the container;
+  # the base pack always stays.
+  $known = @($Courses | ForEach-Object { $_.Id })
+  foreach ($p in @(Get-InstalledPacks)) {
+    if ($p.Id -eq $DefaultCourse -or $known -contains $p.Id) { continue }
+    if (Read-YesNo ('Der Kurs „{0}“ ist im Container nicht mehr installiert. Das VSCodePack entfernen? [j/N]' -f $p.Title) $false) {
+      $null = Remove-Pack $p.Id
+    }
   }
 }
 
-function Start-VsCodePack {
-  # Menu [9] and -Action vscode: container first, then the newest pack.
-  $id = Get-CourseId
+function Install-MissingPacks([string[]]$Ids, [switch]$StartFollows) {
+  # Sets up several packs with one VS Code download; returns the number of
+  # packs that are ready.
+  if ($Ids.Count -eq 0) { return 0 }
+  Say 'Prüfe bei Microsoft, welche VS-Code-Version die neueste ist ...'
+  $latest = Get-LatestVsCode
+  if (-not $latest) { Fail 'Ich konnte bei Microsoft nicht nachsehen, welche VS-Code-Version die neueste ist. Prüfe deine Internetverbindung und versuche es dann erneut.' }
+  $ready = 0
+  foreach ($id in $Ids) {
+    Write-Host ''
+    if (Install-VsCodePack $id $latest -StartFollows:$StartFollows) { $ready++ }
+  }
+  Clear-VsCodeDownload
+  return $ready
+}
+
+function Sync-Packs([switch]$StartFollows) {
+  # Matches the packs to the courses in the container (menu [1], [9], [11]):
+  # offers missing packs and the removal of packs without a course. Runs
+  # once per run of the script.
+  if ($script:PacksSynced) { return }
+  $script:PacksSynced = $true
+  if (-not (Test-WslcAvailable) -or -not (Get-State).Running) { return }
+  if ((Get-RestoreState) -eq 'running') {
+    Say 'Im Container werden gerade die Kurse und Technikpakete wiederhergestellt. Den Abgleich mit den VSCodePacks macht das Skript beim nächsten Start von VS Code (Menüpunkt [9]).' 'Yellow'
+    return
+  }
+  $info = Get-ContainerCourses
+  if (-not $info.Ok) {
+    if ($info.Reason -eq 'old') { Show-OldImageHint }
+    return
+  }
+  $have = @(Get-InstalledPacks | ForEach-Object { $_.Id })
+  $wanted = @(foreach ($c in $info.Courses) {
+      if ($have -contains $c.Id) { continue }
+      $q = 'Im Container ist der Kurs „{0}“ ({1}) installiert, das passende VSCodePack fehlt. Jetzt einrichten? [J/n]' -f $c.Title, $c.Id
+      if (Read-YesNo $q $true) { $c.Id }
+    })
+  $null = Install-MissingPacks $wanted -StartFollows:$StartFollows
+  Remove-OrphanPacks $info.Courses
+}
+
+function Confirm-ContainerForPacks {
+  # Starts an existing, stopped container (the course descriptions come
+  # from it) and waits for a running package restore. Returns the result
+  # of Get-ContainerCourses plus Restored ($false while the restore runs).
+  $info = @{ Ok = $false; Reason = 'stopped'; Courses = @(); Restored = $false }
+  if (-not (Test-WslcAvailable)) { return $info }
+  $s = Get-State
+  if (-not $s.Running) {
+    if (-not $s.Volume) { return $info }
+    Say 'Der Container läuft nicht – ich starte ihn zuerst.' 'Yellow'
+    Start-Clawbook
+  }
+  $restored = Wait-Restore
+  $info = Get-ContainerCourses
+  $info.Restored = $restored
+  return $info
+}
+
+function Install-AllPacks([switch]$StartFollows) {
+  # Menu [10] [1] and -Action vscode-install without -Kurs: the base pack
+  # and one pack per course installed in the container.
+  $info = Confirm-ContainerForPacks
+  if (-not $info.Ok) {
+    if ($info.Reason -eq 'old') { Show-OldImageHint }
+    Say 'Ohne Kursangaben aus dem Container richtet das Skript nur das Grundpack „clawbook“ ein.' 'Yellow'
+  }
+  $ids = @($DefaultCourse) + @($info.Courses | ForEach-Object { $_.Id })
+  $ready = Install-MissingPacks $ids -StartFollows
+  if ($info.Ok -and $info.Restored) { Remove-OrphanPacks $info.Courses }
+  Write-Host ''
+  Say ('{0} von {1} VSCodePacks sind bereit.' -f $ready, $ids.Count) 'Green'
+  if (-not $StartFollows) {
+    Say 'Starten Sie VS Code mit Menüpunkt [9] oder über die Einträge „clawbook VS Code …“ im Startmenü.' 'Green'
+  }
+}
+
+function Select-Pack($Items, [string]$Prompt, [string]$DefaultId = '', [string]$ZeroLabel = 'zurück') {
+  # Numbered choice; items have Id, Title and optionally Note. Returns the
+  # chosen id, '' for 0.
+  Say $Prompt 'Cyan'
+  $def = 0
+  for ($i = 0; $i -lt $Items.Count; $i++) {
+    $note = if ($Items[$i].Note) { " – $($Items[$i].Note)" } else { '' }
+    Say ("  [{0}] {1} ({2}){3}" -f ($i + 1), $Items[$i].Title, $Items[$i].Id, $note)
+    if ($Items[$i].Id -eq $DefaultId) { $def = $i + 1 }
+  }
+  Say "  [0] $ZeroLabel"
+  while ($true) {
+    $a = if ($def) { Read-Host "Auswahl [$def]" } else { Read-Host 'Auswahl' }
+    $a = "$a".Trim()
+    if ($a -eq '' -and $def) { return $Items[$def - 1].Id }
+    if ($a -eq '0') { return '' }
+    if ($a -match '^\d+$' -and [int]$a -ge 1 -and [int]$a -le $Items.Count) { return $Items[[int]$a - 1].Id }
+    Say 'Bitte eine Zahl aus der Liste eingeben.' 'Yellow'
+  }
+}
+
+function Install-OnePack([string]$Id) {
+  # Menu [10] [2] and -Action vscode-install -Kurs <id>. Without $Id the
+  # user chooses among the base pack, the courses in the container and
+  # the packs already there. Returns the id that was set up, '' if none.
+  $info = Confirm-ContainerForPacks
+  if (-not $info.Ok -and $info.Reason -eq 'old') { Show-OldImageHint }
+  if (-not $Id) {
+    $items = New-Object Collections.ArrayList
+    $packs = @(Get-InstalledPacks)
+    $seen = @{}
+    $all = @(@{ Id = $DefaultCourse; Title = (Get-PackTitle $DefaultCourse) }) + @($info.Courses) +
+      @($packs | ForEach-Object { @{ Id = $_.Id; Title = $_.Title } })
+    foreach ($c in $all) {
+      if ($seen.ContainsKey($c.Id)) { continue }
+      $seen[$c.Id] = $true
+      $p = @($packs | Where-Object { $_.Id -eq $c.Id })
+      $note = if ($p.Count -gt 0) { "eingerichtet, VS Code $($p[0].Version)" } else { 'noch nicht eingerichtet' }
+      $title = if ($p.Count -gt 0 -and $p[0].Title -ne $c.Id) { $p[0].Title } else { $c.Title }
+      [void]$items.Add([pscustomobject]@{ Id = $c.Id; Title = $title; Note = $note })
+    }
+    $Id = Select-Pack $items.ToArray() 'Welches VSCodePack möchten Sie einrichten oder aktualisieren?'
+    if (-not $Id) { return '' }
+  }
+  if (Install-VsCodePack $Id -StartFollows) { return $Id }
+  return ''
+}
+
+function Show-PackMenu {
+  # Menu [10]: set up, update or remove VSCodePacks. Sets
+  # $script:LeaveMenu when an action ran; "zurück" returns to the main menu.
+  while ($true) {
+    Write-Host ''
+    Say 'VSCodePacks – was möchten Sie tun?' 'Cyan'
+    Say '  [1] alle passend zum Container einrichten oder aktualisieren (Vorgabe)'
+    Say '  [2] ein einzelnes VSCodePack einrichten oder aktualisieren'
+    Say '  [3] ein VSCodePack entfernen'
+    Say '  [0] zurück'
+    $a = Read-Host 'Auswahl [1]'
+    switch ("$a".Trim()) {
+      { $_ -eq '' -or $_ -eq '1' } {
+        $script:LeaveMenu = $true
+        Install-AllPacks -StartFollows
+        if (Read-YesNo 'VS Code jetzt starten und mit clawbook verbinden? [J/n]' $true) { $script:PacksSynced = $true; Start-VsCodePack }
+        else { Say 'Starten Sie VS Code später mit Menüpunkt [9] oder über die Einträge „clawbook VS Code …“ im Startmenü.' 'Green' }
+        return
+      }
+      '2' {
+        $id = Install-OnePack ''
+        if (-not $id) { continue }
+        $script:LeaveMenu = $true
+        if (Read-YesNo 'VS Code jetzt starten und mit clawbook verbinden? [J/n]' $true) { Start-VsCodePack $id }
+        else { Say ('Starten Sie VS Code später mit Menüpunkt [9] oder über „{0}“ im Startmenü.' -f ((Get-ShortcutName $id (Get-PackTitle $id)) -replace '\.lnk$', '')) 'Green' }
+        return
+      }
+      '3' {
+        $packs = @(Get-InstalledPacks)
+        if ($packs.Count -eq 0) { Say 'Es ist noch kein VSCodePack eingerichtet.' 'Yellow'; continue }
+        $items = @($packs | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Title = $_.Title; Note = "VS Code $($_.Version)" } })
+        $id = Select-Pack $items 'Welches VSCodePack möchten Sie entfernen?'
+        if (-not $id) { continue }
+        $title = Get-PackTitle $id
+        if (Read-YesNo ('Das VSCodePack „{0}“ ({1}) mit seinen Erweiterungen und Einstellungen entfernen? [j/N]' -f $title, $id) $false) {
+          $null = Remove-Pack $id
+        } else { Say 'Abgebrochen.' }
+        continue
+      }
+      '0' { return }
+      default { Say 'Bitte 1, 2, 3 oder 0 eingeben.' 'Yellow' }
+    }
+  }
+}
+
+function Start-VsCodePack([string]$Id = '') {
+  # Menu [9] and -Action vscode [-Kurs <id>]: container first, then the
+  # newest version of the chosen pack. Several packs and no -Kurs: the
+  # user chooses (default: the pack started last).
   if (-not (Get-State).Running) {
     Say 'Der Container läuft nicht – ich starte ihn zuerst.' 'Yellow'
     Start-Clawbook
   } elseif (-not (Test-Path -LiteralPath $KeyFile)) {
     Set-Ssh
   }
-  $packs = @(Get-PackVersions $id)
-  if ($packs.Count -eq 0) {
-    Say 'Das VSCodePack (ein eigenes VS Code für clawbook) ist noch nicht installiert.' 'Yellow'
+  $null = Wait-Restore
+  Sync-Packs -StartFollows
+  $packs = @(Get-InstalledPacks)
+  if (-not $Id) {
+    if ($packs.Count -eq 1) { $Id = $packs[0].Id }
+    elseif ($packs.Count -gt 1) {
+      $Id = Select-Pack $packs 'Welches VS Code möchten Sie starten?' (Get-LastPack) 'abbrechen'
+      if (-not $Id) { Say 'Abgebrochen.'; return }
+    } else { $Id = $DefaultCourse }
+  }
+  if (-not (@($packs | ForEach-Object { $_.Id }) -contains $Id)) {
+    if ($Id -eq $DefaultCourse) {
+      Say 'Das VSCodePack (ein eigenes VS Code für clawbook) ist noch nicht installiert.' 'Yellow'
+    } else {
+      Say ('Das VSCodePack für den Kurs „{0}“ ist noch nicht eingerichtet.' -f $Id) 'Yellow'
+    }
     if (-not (Read-YesNo 'Jetzt installieren? Dafür lädt das Skript VS Code (etwa 150 MB) direkt bei Microsoft. [J/n]' $true)) {
       Say 'Abgebrochen.'
       return
     }
-    Install-VsCodePack -StartFollows
-    $packs = @(Get-PackVersions $id)
-    if ($packs.Count -eq 0) { Fail 'Das VSCodePack ist nach der Installation nicht zu finden.' }
+    if (-not (Install-VsCodePack $Id -StartFollows)) { return }
   }
-  $course = Read-CourseDescription $id -PreferCache
+  $versions = @(Get-PackVersions $Id)
+  if ($versions.Count -eq 0) { Fail 'Das VSCodePack ist nach der Installation nicht zu finden.' }
+  $course = Read-CourseDescription $Id -PreferCache
   $folder = if ($course) { $course.Folder } else { $DefaultFolder }
-  $exe = Join-Path $packs[0].Path 'Code.exe'
+  $title = if ($course) { $course.Title } else { $Id }
+  $exe = Join-Path $versions[0].Path 'Code.exe'
   $argLine = ConvertTo-ArgumentString @('--remote', 'ssh-remote+clawbook', $folder)
-  Say ("Starte VS Code {0} und verbinde es mit clawbook (Ordner {1}) ..." -f $packs[0].Version, $folder) 'Cyan'
+  Say ("Starte VS Code {0} ({1}) und verbinde es mit clawbook (Ordner {2}) ..." -f $versions[0].Version, $title, $folder) 'Cyan'
   Log "$exe $argLine"
-  Start-Process -FilePath $exe -ArgumentList $argLine -WorkingDirectory $packs[0].Path | Out-Null
+  Start-Process -FilePath $exe -ArgumentList $argLine -WorkingDirectory $versions[0].Path | Out-Null
+  try { [IO.File]::WriteAllText($LastPackFile, "$Id`r`n", $Utf8NoBom) } catch { Log ("zuletzt.txt: {0}" -f $_.Exception.Message) }
   Say 'VS Code öffnet sich in einem eigenen Fenster. Beim ersten Verbinden richtet es sich im Container ein; das dauert ein bis zwei Minuten.' 'Green'
 }
 
 function Show-PackStatus {
-  $id = Get-CourseId
-  $packs = @(Get-PackVersions $id)
-  Say ("VSCodePack:         Kennung {0}" -f $id)
-  if ($packs.Count -gt 0) {
-    Say ("VS Code im Pack:    {0} ({1})" -f $packs[0].Version, $packs[0].Path)
+  $packs = @(Get-InstalledPacks)
+  if ($packs.Count -eq 0) {
+    Say 'VSCodePacks:        keine (Menüpunkt [10])'
   } else {
-    Say 'VS Code im Pack:    noch nicht installiert (Menüpunkt [10])'
+    Say 'VSCodePacks:'
+    $w = ($packs | ForEach-Object { $_.Id.Length } | Measure-Object -Maximum).Maximum
+    foreach ($p in $packs) { Say ("  {0}  {1} (VS Code {2})" -f $p.Id.PadRight($w), $p.Title, $p.Version) }
   }
   # Only if Microsoft answers quickly; otherwise the line is left out.
   $latest = Get-LatestVsCode -TimeoutSec 3 -NoFallback
   if ($latest) {
     $hint = ''
-    if ($packs.Count -gt 0 -and [version]$latest.Version -gt $packs[0].Version) { $hint = ' – aktualisieren mit Menüpunkt [10]' }
+    $old = @($packs | Where-Object { [version]$latest.Version -gt $_.Version })
+    if ($old.Count -gt 0) { $hint = ' – aktualisieren mit Menüpunkt [10]' }
     Say ("Neuestes VS Code:  {0}{1}" -f $latest.Version, $hint)
   }
 }
@@ -1360,13 +1878,14 @@ function Show-Menu {
       Say '  [6] Status anzeigen'
       Say '  [7] anhalten'
       Say '  [8] zurücksetzen (Home neu, vorher Sicherung)'
-      Say '  [9] VS Code starten und verbinden (VSCodePack)'
-      Say ' [10] VSCodePack installieren oder aktualisieren'
+      Say '  [9] VS Code starten'
+      Say ' [10] VSCodePacks einrichten'
+      Say ' [11] Kurse und Technikpakete'
       Say '  [0] beenden'
       $a = Read-Host 'Auswahl [1]'
       switch ($a) {
-        '' { Start-Clawbook; return }
-        '1' { Start-Clawbook; return }
+        '' { Start-Clawbook; Sync-Packs; return }
+        '1' { Start-Clawbook; Sync-Packs; return }
         '2' { Update-Clawbook; return }
         '3' { $null = Export-Home ''; return }
         '4' { Import-Home ''; return }
@@ -1376,10 +1895,11 @@ function Show-Menu {
         '8' { Reset-Clawbook; return }
         '9' { Start-VsCodePack; return }
         '10' {
-          Install-VsCodePack
-          if (Read-YesNo 'VS Code jetzt starten und mit clawbook verbinden? [J/n]' $true) { Start-VsCodePack }
-          return
+          $script:LeaveMenu = $false
+          Show-PackMenu
+          if ($script:LeaveMenu) { return }
         }
+        '11' { Invoke-ContainerMenu; return }
         '0' { return }
         default { Say 'Bitte eine Zahl aus dem Menü eingeben.' 'Yellow' }
       }
@@ -1391,9 +1911,15 @@ function Show-Menu {
 Log "=== clawbook.ps1 Action='$Action' Image='$Image' Ref='$Ref'"
 if ($Ref -notmatch '^[A-Za-z0-9._/-]+$') { Fail "CLAWBOOK_REF enthält unzulässige Zeichen: $Ref" }
 Say "Protokoll: $LogFile" 'DarkGray'
+# The single course id of DEC-054 is replaced by one pack per course (DEC-060).
+if (Test-Path -LiteralPath $CourseFile) {
+  Log 'kurs.txt (DEC-054) wird nicht mehr gebraucht und entfernt'
+  Remove-Item -Force -LiteralPath $CourseFile -ErrorAction SilentlyContinue
+}
 try {
-  # Installing the VSCodePack needs neither WSL nor the container.
+  # Installing a VSCodePack works without WSL (then only the base pack).
   if ($Action -ne 'vscode-install') { Test-Wslc }
+  elseif (Get-Command wslc -ErrorAction SilentlyContinue) { $script:WslcPath = (Get-Command wslc).Source }
   switch ($Action) {
     'start' { Start-Clawbook }
     'update' { Update-Clawbook }
@@ -1403,8 +1929,9 @@ try {
     'status' { Show-Status }
     'stop' { Stop-Clawbook }
     'reset' { Reset-Clawbook }
-    'vscode' { Start-VsCodePack }
-    'vscode-install' { Install-VsCodePack }
+    'vscode' { Start-VsCodePack $Kurs }
+    'vscode-install' { if ($Kurs) { $null = Install-OnePack $Kurs } else { Install-AllPacks } }
+    'pakete' { Invoke-ContainerMenu }
     default { Show-Menu }
   }
 } catch {

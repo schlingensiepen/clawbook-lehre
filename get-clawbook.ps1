@@ -8,7 +8,8 @@
 # again always fetches the newest version.
 #
 # Optional, for tests and power users (set before running the command):
-#   $env:CLAWBOOK_ACTION = 'status'   # start|update|export|import|ssh|status|stop|reset|vscode|vscode-install
+#   $env:CLAWBOOK_ACTION = 'status'   # start|update|export|import|ssh|status|stop|reset|vscode|vscode-install|pakete
+#   $env:CLAWBOOK_KURS   = 'kurs-inf' # VSCodePack for vscode/vscode-install (clawbook = base pack)
 #   $env:CLAWBOOK_IMAGE  = 'ghcr.io/schlingensiepen/clawbook-lehre:v0.4.0-rc.1'
 #   $env:CLAWBOOK_REF    = 'mein-branch'  # branch or tag to load files from (default main)
 # CLAWBOOK_REF stays in the environment of the started script, which builds
@@ -42,5 +43,6 @@
   $params = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $target)
   if ($env:CLAWBOOK_ACTION) { $params += @('-Action', $env:CLAWBOOK_ACTION) }
   if ($env:CLAWBOOK_IMAGE) { $params += @('-Image', $env:CLAWBOOK_IMAGE) }
+  if ($env:CLAWBOOK_KURS) { $params += @('-Kurs', $env:CLAWBOOK_KURS) }
   & $shell @params
 }

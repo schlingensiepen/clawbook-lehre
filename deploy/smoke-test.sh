@@ -10,7 +10,11 @@
 # XWayland display, browsers for playwright-cli, Playwright-MCP and
 # notebooklm as "student", Samba share
 # (read/write with the shown password), and that keys survive recreating
-# the container with the same home volume.
+# the container with the same home volume. Then the packages: source and
+# key in the image, catalog of the real source clawbook-apt (needs the
+# internet), kurs-inf installed and in the VS Code description, and the
+# restore after recreating the container - online from the apt cache in the
+# home volume, then without any network.
 #
 # Needs: docker, ssh, ssh-keygen. smbclient is used when installed,
 # otherwise a throwaway Debian container provides it.
@@ -114,7 +118,7 @@ json_ok "${out}" 'isinstance(d, list) and len(d) > 0 and all(t["ok"] for t in d)
 ssh_run 'rm -f ~/.clawbook/stand.json && clawbook stand --write >/dev/null' \
   || fail "clawbook stand --write failed"
 out=$(ssh_run 'cat ~/.clawbook/stand.json') || fail "clawbook stand --write wrote no stand.json"
-json_ok "${out}" 'd["format"] == 1 and d["kennung"] == "clawbook" and d["pakete"] == []' \
+json_ok "${out}" 'd["format"] == 2 and d["kurse"] == [] and d["pakete"] == [] and d["ausstehend"] == [] and "kennung" not in d' \
   || fail "stand.json: unexpected content"
 ssh_run "test \"\$(stat -c %U ~/.clawbook/stand.json)\" = student" \
   || fail "stand.json does not belong to student"
@@ -129,13 +133,19 @@ if [ -f "${pack_json}" ]; then
     <"${pack_json}" || fail "built-in course description differs from windows/vscodepack/clawbook.json"
 fi
 rc=0; out=$(ssh_run 'clawbook pakete --json') || rc=$?
-if [ "${rc}" != 2 ] || ! json_ok "${out}" 'd == {"verfuegbar": False}'; then
-  fail "clawbook pakete --json: expected exit 2 and {\"verfuegbar\": false}"
+if [ "${rc}" != 2 ] || ! json_ok "${out}" '"fehler" in d'; then
+  fail "clawbook pakete --json without subcommand: expected exit 2 and a usage error"
 fi
+rc=0; out=$(ssh_run 'clawbook pakete add kurs-inf --json') || rc=$?
+if [ "${rc}" != 2 ] || ! json_ok "${out}" '"--yes" in d["fehler"]'; then
+  fail "clawbook pakete add without terminal and --yes did not refuse"
+fi
+out=$(ssh_run 'clawbook kurse --json') || fail "clawbook kurse --json failed"
+json_ok "${out}" 'd == {"kurse": []}' || fail "clawbook kurse --json: expected no courses"
 ssh_run 'clawbook key show --json' >/dev/null || fail "clawbook key show --json failed"
 # The status interface stays as the Windows script knows it.
 out=$(ssh_run 'clawbook status --json')
-json_ok "${out}" 'sorted(d) == ["aufgerufen_als", "benutzer", "build", "dienste", "home", "image", "schnittstelle"] and d["schnittstelle"] == 1' \
+json_ok "${out}" 'sorted(d) == ["aufgerufen_als", "benutzer", "build", "dienste", "home", "image", "paket_cache", "schnittstelle", "wiederherstellung_details"] and d["schnittstelle"] == 2 and d["wiederherstellung_details"]["zustand"] == "keine"' \
   || fail "clawbook status --json: fields changed"
 echo "cli ok"
 
@@ -309,5 +319,146 @@ ssh -i "${WORK}/oldkey" -p "${SSH_PORT}" -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o LogLevel=ERROR \
     student@127.0.0.1 true 2>/dev/null && fail "old key still logs in after clawbook key new"
 echo "key new ok"
+
+# --- Technology packages and courses (clawbook-apt) ------------------------
+docker exec "${NAME}" bash -c 'test -s /usr/share/keyrings/clawbook-apt.gpg \
+  && grep -q "^URIs: https://schlingensiepen.github.io/clawbook-apt" /etc/apt/sources.list.d/clawbook.sources \
+  && grep -q "^Signed-By: /usr/share/keyrings/clawbook-apt.gpg" /etc/apt/sources.list.d/clawbook.sources' \
+  || fail "package source clawbook-apt or its key missing in the image"
+docker exec "${NAME}" bash -c 'apt-config dump | grep -q "Dir::Cache::archives \"/home/student/.clawbook/apt/archives/\"" \
+  && test "$(stat -c %U /home/student/.clawbook/apt/archives/partial)" = _apt' \
+  || fail "apt cache is not in the home volume"
+out=$(ssh_run 'clawbook pakete katalog --json') || fail "clawbook pakete katalog --json failed: ${out}"
+json_ok "${out}" 'd["aktualisiert"] and len(d["pakete"]) >= 15 and {"kurs-inf", "kurs-swe", "kurs-iot"} <= {p["name"] for p in d["pakete"] if p["art"] == "kurs"} and not any(p["installiert"] for p in d["pakete"])' \
+  || fail "catalog does not show the 15 packages of clawbook-apt: ${out}"
+# "clawbook pakete" on a terminal opens the menu (courses first); Enter leaves.
+out=$(ssh_tty '\n' 'clawbook pakete; echo "rc=$?"')
+if ! has 'Pakete und Kurse - Kurse' || ! has 'kurs-inf' || ! has 'Technikpakete einzeln' || ! has 'rc=0'; then
+  fail "clawbook pakete did not open the package menu: ${out}"
+fi
+echo "catalog ok"
+start=$(date +%s)
+out=$(ssh_run 'clawbook pakete add kurs-inf --yes --json 2>/tmp/add.log') \
+  || { ssh_run 'tail -n 30 /tmp/add.log' || true; fail "clawbook pakete add kurs-inf failed: ${out}"; }
+json_ok "${out}" 'd["installiert"] == ["kurs-inf"] and d["vorladen"] is None' \
+  || fail "clawbook pakete add kurs-inf: unexpected result: ${out}"
+echo "kurs-inf installed in $(( $(date +%s) - start ))s"
+ssh_run 'java -version 2>&1 | grep -q "25\." && mvn -v >/dev/null && gradle --version >/dev/null \
+  && spring --version && sqlite3 --version >/dev/null && http --version >/dev/null \
+  && xh --version >/dev/null && hurl --version >/dev/null' >/dev/null \
+  || fail "kurs-inf: Java, Spring, SQLite or the web API tools missing"
+out=$(ssh_run 'clawbook kurse --json')
+json_ok "${out}" 'd["kurse"] == [{"kennung": "kurs-inf", "titel": "Ingenieurinformatik", "version": d["kurse"][0]["version"]}]' \
+  || fail "clawbook kurse --json: kurs-inf missing: ${out}"
+out=$(ssh_run 'clawbook kurs vscode kurs-inf --json') || fail "clawbook kurs vscode kurs-inf failed"
+json_ok "${out}" 'd["format"] == 1 and d["kennung"] == "kurs-inf" and {"vscjava.vscode-java-pack", "vmware.vscode-boot-dev-pack", "zknpr.sqlite-explorer", "humao.rest-client"} <= set(d["container"]["erweiterungen"]) and "ms-vscode-remote.remote-ssh" in d["windows"]["erweiterungen"] and d["einstellungen"]["update.mode"] == "none"' \
+  || fail "clawbook kurs vscode kurs-inf: Java/Spring extensions missing: ${out}"
+out=$(ssh_run 'clawbook kurs vscode clawbook --json')
+json_ok "${out}" 'd["kennung"] == "clawbook" and "vscjava.vscode-java-pack" in d["container"]["erweiterungen"]' \
+  || fail "clawbook kurs vscode clawbook: extensions of the technology packages missing"
+out=$(ssh_run 'cat ~/.clawbook/stand.json')
+json_ok "${out}" 'd["kurse"] == ["kurs-inf"] and {p["name"]: p["manuell"] for p in d["pakete"]}.get("kurs-inf") is True and {p["name"]: p["manuell"] for p in d["pakete"]}.get("clawbook-java") is False' \
+  || fail "stand.json not updated after pakete add: ${out}"
+out=$(ssh_run 'clawbook status --json')
+json_ok "${out}" 'd["paket_cache"]["bytes"] > 50 * 1024 * 1024 and "wiederherstellung" not in d' \
+  || fail "apt cache in the home volume is (nearly) empty: ${out}"
+echo "packages ok"
+
+# New image (simulated): recreate the container with the same home. The
+# restore runs in the background and must not delay SSH.
+wait_restore() {
+  # prints "clawbook status --json" once the restore has ended
+  local st=""
+  for _ in $(seq 1 180); do
+    st=$(docker exec "${NAME}" clawbook status --json 2>/dev/null) || true
+    if json_ok "${st}" 'd.get("wiederherstellung") in ("fertig", "fehler")' 2>/dev/null; then
+      printf '%s' "${st}"
+      return 0
+    fi
+    sleep 5
+  done
+  printf '%s' "${st}"
+  return 1
+}
+restore_ok() {
+  # $1 = what is tested; the last restore must be "fertig" and kurs-inf back
+  local st
+  st=$(wait_restore) || fail "$1: restore did not finish: ${st}"
+  json_ok "${st}" 'd["wiederherstellung"] == "fertig"' \
+    || { docker exec "${NAME}" tail -n 40 /home/student/.clawbook/restore.log || true
+         fail "$1: restore failed: ${st}"; }
+  docker exec -u student "${NAME}" bash -lc 'java -version 2>&1 | grep -q "25\." && spring --version >/dev/null && sqlite3 --version >/dev/null && test -d /usr/share/clawbook/kurse/kurs-inf' \
+    || fail "$1: kurs-inf not back after the restore"
+}
+debs() {
+  docker run --rm --entrypoint bash -v "${VOLUME}:/h" "${IMAGE}" -c 'ls /h/.clawbook/apt/archives/*.deb | sort'
+}
+cache_before=$(debs)
+
+# 1. Online: everything comes from the apt cache (no new .deb in the cache).
+docker rm -f "${NAME}" >/dev/null
+run_container
+wait_healthy
+ssh_run true || fail "SSH login failed while the restore runs"
+out=$(docker exec "${NAME}" clawbook status --json)
+json_ok "${out}" 'd["wiederherstellung"] in ("läuft", "fertig") and d["wiederherstellung_details"]["pakete"] == ["kurs-inf"]' \
+  || fail "restore was not started after recreating the container: ${out}"
+LC_ALL=C grep -q '[^[:print:][:space:]]' <<<"${out}" && fail "clawbook status --json is not ASCII-only"
+restore_ok "restore online"
+[ "$(debs)" = "${cache_before}" ] || fail "restore downloaded packages again instead of using the apt cache"
+echo "restore (apt cache) ok"
+
+# 2. docker restart after a finished restore: nothing to do, no restart loop.
+docker restart "${NAME}" >/dev/null
+wait_healthy
+sleep 8
+out=$(docker exec "${NAME}" clawbook status --json)
+json_ok "${out}" '"wiederherstellung" not in d and d["wiederherstellung_details"]["zustand"] == "keine"' \
+  || fail "restore runs again after docker restart: ${out}"
+docker exec "${NAME}" bash -c '/command/s6-svstat /run/service/clawbook-restore | grep -Eq "^down .* ([3-9]|[1-9][0-9]+) seconds"' \
+  || fail "service clawbook-restore restarts in a loop: $(docker exec "${NAME}" /command/s6-svstat /run/service/clawbook-restore)"
+echo "restart ok"
+
+# 3. Without any network, package lists present.
+docker rm -f "${NAME}" >/dev/null
+docker run -d --name "${NAME}" --network none -v "${VOLUME}:/home/student" "${IMAGE}" >/dev/null
+wait_healthy
+restore_ok "restore offline"
+echo "restore (offline) ok"
+
+# 4. Without network AND without package lists, stand.json in format 1
+#    (as written by images before interface 2): straight from the .deb files.
+docker rm -f "${NAME}" >/dev/null
+docker run --rm --entrypoint bash -v "${VOLUME}:/h" "${IMAGE}" -c '
+  find /h/.clawbook/apt/lists -maxdepth 1 -type f -delete
+  cat > /h/.clawbook/stand.json <<JSON
+{"format": 1, "schnittstelle": 1, "kennung": "clawbook",
+ "pakete": [{"name": "kurs-inf", "version": "0.8.0-1", "art": "kurs"}],
+ "vscode": {"container": {"erweiterungen": []}}}
+JSON
+  chown 1000:1000 /h/.clawbook/stand.json'
+docker run -d --name "${NAME}" --network none -v "${VOLUME}:/home/student" "${IMAGE}" >/dev/null
+wait_healthy
+restore_ok "restore offline without package lists (stand format 1)"
+out=$(docker exec "${NAME}" cat /home/student/.clawbook/stand.json)
+json_ok "${out}" 'd["format"] == 2 and d["kurse"] == ["kurs-inf"] and {p["name"]: p["manuell"] for p in d["pakete"]}.get("clawbook-java") is False' \
+  || fail "stand.json after restore from format 1: ${out}"
+echo "restore (format 1, no lists) ok"
+
+# Removing the course takes its technology packages, nothing else.
+before=$(docker exec "${NAME}" dpkg-query -W -f='${Package}\n' | sort)
+out=$(docker exec -u student "${NAME}" clawbook pakete remove kurs-inf --yes --json 2>/dev/null) \
+  || fail "clawbook pakete remove kurs-inf failed: ${out}"
+json_ok "${out}" 'd["entfernt"] == ["kurs-inf"]' || fail "pakete remove: unexpected result: ${out}"
+docker exec -u student "${NAME}" bash -c '! command -v spring && ! dpkg -l clawbook-java 2>/dev/null | grep -q ^ii' >/dev/null \
+  || fail "pakete remove left the technology packages of kurs-inf behind"
+after=$(docker exec "${NAME}" dpkg-query -W -f='${Package}\n' | sort)
+gone=$(comm -23 <(echo "${before}") <(echo "${after}"))
+image_pkgs=$(docker run --rm --entrypoint dpkg-query "${IMAGE}" -W -f='${Package}\n' | sort)
+lost=$(comm -12 <(echo "${gone}") <(echo "${image_pkgs}"))
+[ -z "${lost}" ] || fail "pakete remove removed packages of the image: ${lost}"
+out=$(docker exec -u student "${NAME}" clawbook kurse --json)
+json_ok "${out}" 'd == {"kurse": []}' || fail "kurs-inf still listed after remove"
+echo "remove ok"
 
 echo "Smoke test passed."

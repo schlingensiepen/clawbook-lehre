@@ -6,15 +6,21 @@ Without arguments an interactive menu starts. Every subcommand accepts
 the exit code tells success (0) or failure (non-zero).
 
     clawbook                        interactive menu
-    clawbook status [--json]        interface version, build, services, home
+    clawbook status [--json]        interface version, build, services, home,
+                                    package cache, restore after a new image
     clawbook check [--quiet|--json] are all tools of the image present?
     clawbook key show [--private]   public key and fingerprint (or private key)
     clawbook key new [--yes]        new key pair, replaces the old one
-    clawbook stand [--write]        derived state (packages, course, VS Code)
-    clawbook kurs vscode <id>       course description (vscode.json)
+    clawbook stand [--write]        derived state (courses, packages, VS Code)
+    clawbook kurse [--json]         installed courses
+    clawbook kurs vscode <id>       merged course description for VS Code
     clawbook github status [--json] is gh logged in to GitHub? (never prompts)
     clawbook github login           GitHub login with gh (needs a terminal)
-    clawbook pakete ...             packages and courses (later version)
+    clawbook pakete katalog         technology and course packages (clawbook-apt)
+    clawbook pakete add|remove <name...> [--yes] [--vorladen]
+    clawbook pakete vorladen        PlatformIO platform for ESP32 (pioarduino)
+    clawbook wiederherstellen       install packages from stand.json again
+                                    (--pruefen: cont-init, --dienst: service)
 
 Interactive start: when gh is not logged in, the menu begins with the
 GitHub login (the student may cancel; then she is asked again next time).
@@ -29,6 +35,7 @@ exec run as root): files in the home directory always belong to "student".
 
 import concurrent.futures
 import datetime
+import glob
 import json
 import os
 import pwd
@@ -37,10 +44,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 # Version of the command line interface the Windows script talks to.
 # Raise it when JSON fields change incompatibly or commands disappear.
-SCHNITTSTELLE = 1
+# 2: "pakete", "kurse", merged "kurs vscode", stand format 2 ("kurse"
+#    instead of "kennung"), status with "paket_cache" and
+#    "wiederherstellung".
+SCHNITTSTELLE = 2
+STAND_FORMAT = 2
 
 USER_NAME = "student"
 BUILD_FILE = "/etc/clawbook-build"
@@ -48,7 +60,21 @@ KURSE_DIR = "/usr/share/clawbook/kurse"
 VSCODE_LISTS_DIR = "/usr/share/clawbook/vscode-extensions.d"
 SERVICES = ("sshd", "weston", "smbd")
 COURSE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+# Packages clawbook manages: technology packages and courses of clawbook-apt.
+PACKAGE_RE = re.compile(r"^(clawbook|kurs)-[a-z0-9](?:[a-z0-9.+-]{0,61}[a-z0-9])?$")
 DEFAULT_COURSE = "clawbook"
+# apt keeps downloads and package lists here (etc/apt/apt.conf.d/
+# zz-clawbook-cache); the directory is part of the home volume.
+APT_STATE = "apt"
+APT_ENV = {"DEBIAN_FRONTEND": "noninteractive"}
+# Wait for a running apt (e.g. the restore service) instead of failing.
+APT_LOCK = ["-o", "DPkg::Lock::Timeout=900"]
+RESTORE_JSON = "restore.json"
+RESTORE_LOG = "restore.log"
+# PlatformIO: ESP32 with the Arduino core 3.x from pioarduino (DEC-063).
+PIO_PLATFORM_URL = ("https://github.com/pioarduino/platform-espressif32/"
+                    "releases/download/stable/platform-espressif32.zip")
+PIO_PACKAGES = ("kurs-iot", "clawbook-embedded")
 GH_HOST = "github.com"
 # Marker in ~/.clawbook: do not open the menu on SSH login. Same name in
 # /etc/profile.d/zz-clawbook-menu.sh.
@@ -100,13 +126,28 @@ Aufruf:
   clawbook key new [--yes] [--json]
                                    neues Schlüsselpaar (fragt vorher nach)
   clawbook stand [--write] [--json]
-                                   zeigt den Stand (Pakete, Kurs, VS Code);
+                                   zeigt den Stand (Kurse, Pakete, VS Code);
                                    --write speichert ~/.clawbook/stand.json
+  clawbook kurse [--json]          installierte Kurse
   clawbook kurs vscode <kennung> [--json]
-                                   Kursbeschreibung für VS Code
+                                   Beschreibung für das VSCodePack des Kurses
+                                   (mit den Erweiterungen der Technikpakete;
+                                   Kennung clawbook = ohne Kurs)
   clawbook github status [--json]  bist du bei GitHub angemeldet?
   clawbook github login            bei GitHub anmelden (Browser, Gerätecode)
-  clawbook pakete ...              Pakete und Kurse (kommt später)
+  clawbook pakete                  Menü „Pakete und Kurse“ (interaktiv)
+  clawbook pakete katalog [--json] Kurse und Technikpakete der Paketquelle
+  clawbook pakete add <name...> [--yes] [--vorladen] [--json]
+                                   installiert Kurse/Technikpakete
+                                   (--vorladen: PlatformIO gleich mit laden)
+  clawbook pakete remove <name...> [--yes] [--json]
+                                   entfernt sie wieder
+  clawbook pakete vorladen [--json]
+                                   PlatformIO für ESP32 vorladen (ca. 6 GB)
+  clawbook wiederherstellen [--json]
+                                   Pakete aus ~/.clawbook/stand.json erneut
+                                   einspielen (läuft nach einem neuen Image
+                                   von selbst im Hintergrund)
   clawbook --version | --help
 
 Mit --json gibt clawbook nur JSON aus (für das Windows-Skript).
@@ -142,11 +183,13 @@ def key_path():
     return os.path.join(user_home(), ".ssh", "id_ed25519")
 
 
-def run(cmd, timeout=60, stdin=subprocess.DEVNULL):
-    """Runs a command; returns (exit code, stdout+stderr as text)."""
+def run(cmd, timeout=60, stdin=subprocess.DEVNULL, env=None):
+    """Runs a command; returns (exit code, stdout+stderr as text).
+    env: extra environment variables."""
+    full_env = dict(os.environ, **env) if env else None
     try:
         p = subprocess.run(cmd, stdin=stdin, stdout=subprocess.PIPE,
-                           stderr=subprocess.STDOUT, timeout=timeout)
+                           stderr=subprocess.STDOUT, timeout=timeout, env=full_env)
     except (OSError, subprocess.TimeoutExpired) as e:
         return 127, str(e)
     return p.returncode, p.stdout.decode("utf-8", "replace")
@@ -260,11 +303,15 @@ def home_is_mount(path):
     return os.path.ismount(path)
 
 
+# "wiederherstellung" in "status --json" (ASCII-escaped in the JSON).
+RESTORE_WORD = {"laeuft": "läuft", "fertig": "fertig", "fehler": "fehler"}
+
+
 def collect_status():
     build = read_build()
     home = user_home()
     usage = shutil.disk_usage(home)
-    return {
+    data = {
         "schnittstelle": SCHNITTSTELLE,
         "build": {"commit": build.get("commit"), "erstellt": build.get("built")},
         "image": image_version(build),
@@ -278,7 +325,18 @@ def collect_status():
             "belegt_bytes": usage.used,
             "frei_bytes": usage.free,
         },
+        "paket_cache": {
+            "pfad": os.path.join(apt_dir(), "archives"),
+            "bytes": dir_size(os.path.join(apt_dir(), "archives")),
+            "listen_bytes": dir_size(os.path.join(apt_dir(), "lists")),
+        },
+        "wiederherstellung_details": restore_summary(),
     }
+    # Short form for the Windows script: missing = nothing to restore.
+    zustand = data["wiederherstellung_details"]["zustand"]
+    if zustand != "keine":
+        data["wiederherstellung"] = RESTORE_WORD[zustand]
+    return data
 
 
 def cmd_status(opts):
@@ -299,7 +357,30 @@ def cmd_status(opts):
     print(f"  Home:           {h['pfad']} ({vol})")
     print(f"                  belegt {human_bytes(h['belegt_bytes'])} von "
           f"{human_bytes(h['gesamt_bytes'])}, frei {human_bytes(h['frei_bytes'])}")
+    c = s["paket_cache"]
+    print(f"  Paket-Cache:    {human_bytes(c['bytes'])} in {c['pfad']}"
+          f" (Paketlisten {human_bytes(c['listen_bytes'])})")
+    print(f"  Wiederherstellung: {restore_text(s['wiederherstellung_details'])}")
     return 0
+
+
+RESTORE_TEXT = {"keine": "nicht nötig", "laeuft": "läuft", "fertig": "fertig",
+                "fehler": "FEHLER"}
+
+
+def restore_text(r):
+    text = RESTORE_TEXT.get(r["zustand"], r["zustand"])
+    if r["pakete"] and r["zustand"] != "keine":
+        text += f" ({', '.join(r['pakete'])})"
+    if r["zustand"] == "fertig" and r.get("download"):
+        text += f", Download {r['download']}"
+    if r.get("meldung"):
+        text += f"\n                  {r['meldung']}"
+    if r["zustand"] == "fehler":
+        text += "\n                  erneut versuchen: clawbook wiederherstellen"
+    elif r["zustand"] == "laeuft":
+        text += f"\n                  Fortschritt: {r['log']}"
+    return text
 
 
 # --- check -----------------------------------------------------------------
@@ -459,7 +540,100 @@ def cmd_key_new(opts):
     return 0
 
 
-# --- stand -----------------------------------------------------------------
+# --- apt -------------------------------------------------------------------
+# Technology packages (clawbook-*) and courses (kurs-*) come from the signed
+# source clawbook-apt (/etc/apt/sources.list.d/clawbook.sources). apt keeps
+# downloads and package lists in the home volume (~/.clawbook/apt).
+
+def now_text():
+    return (datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+            .isoformat().replace("+00:00", "Z"))
+
+
+def read_json(path):
+    with open(path, encoding="utf-8-sig") as f:
+        return json.load(f)
+
+
+def apt_dir():
+    return os.path.join(state_dir(), APT_STATE)
+
+
+def dir_size(path):
+    """Bytes of all files below path (unreadable parts are skipped)."""
+    total = 0
+    for root, _dirs, files in os.walk(path, onerror=lambda e: None):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def as_root(cmd):
+    if os.geteuid() == 0:
+        return cmd
+    return ["sudo", "-n"] + cmd
+
+
+def apt_get(args, c_locale=False):
+    """apt-get as root, without debconf questions, waiting for apt locks.
+    c_locale: English messages (parsed by clawbook, stable in the log)."""
+    env = ["DEBIAN_FRONTEND=noninteractive"] + (["LC_ALL=C.UTF-8"] if c_locale else [])
+    return as_root(["env"] + env + ["apt-get"] + APT_LOCK + args)
+
+
+def apt_update_problem(rc, out):
+    """German message when "apt-get update" did not reach every source."""
+    bad = [ln.strip() for ln in out.splitlines()
+           if ln.startswith(("Err:", "E:"))
+           or (ln.startswith("W:") and ("Failed to fetch" in ln or "index files" in ln))]
+    if rc == 0 and not bad:
+        return None
+    if re.search(r"Temporary failure resolving|Could not resolve|Network is unreachable|"
+                 r"Could not connect|Connection timed out|No route to host", out):
+        return ("Keine Verbindung zum Internet: Die Paketquellen sind nicht erreichbar. "
+                "clawbook arbeitet mit den zuletzt geladenen Paketlisten.")
+    if re.search(r"Could not get lock|Unable to lock", out):
+        return "Die Paketverwaltung ist gerade belegt (läuft eine Installation?)."
+    if "sudo" in out and rc != 0:
+        return f"apt-get update braucht root-Rechte: {out.strip().splitlines()[-1]}"
+    detail = bad[0] if bad else (out.strip().splitlines() or ["unbekannter Fehler"])[-1]
+    return f"Die Paketquellen ließen sich nicht aktualisieren: {detail}"
+
+
+def apt_update():
+    """Refreshes the package lists. Returns (problem or None, apt output)."""
+    rc, out = run(apt_get(["-q", "update"], c_locale=True), timeout=900)
+    return apt_update_problem(rc, out), out
+
+
+def catalog_packages():
+    """Packages of clawbook-apt known to apt (only those with the field
+    X-Clawbook-Art): [{name, art, version, beschreibung}]."""
+    env = {"LC_ALL": "C.UTF-8"}
+    _, out = run(["apt-cache", "search", "--names-only", r"^(clawbook|kurs)-"],
+                 timeout=120, env=env)
+    names = sorted({ln.split(" - ", 1)[0].strip() for ln in out.splitlines() if " - " in ln})
+    names = [n for n in names if PACKAGE_RE.match(n)]
+    if not names:
+        return []
+    _, out = run(["apt-cache", "show", "--no-all-versions"] + names, timeout=120, env=env)
+    result = []
+    for stanza in out.split("\n\n"):
+        fields = {}
+        for line in stanza.splitlines():
+            if line[:1] not in (" ", "\t") and ":" in line:
+                key, value = line.split(":", 1)
+                fields[key.strip().lower()] = value.strip()
+        name, art = fields.get("package"), fields.get("x-clawbook-art")
+        if not name or not art or any(p["name"] == name for p in result):
+            continue
+        result.append({"name": name, "art": art, "version": fields.get("version"),
+                       "beschreibung": fields.get("description", "")})
+    return result
+
 
 def installed_packages():
     """Installed clawbook-* and kurs-* packages from dpkg."""
@@ -478,18 +652,29 @@ def installed_packages():
     return sorted(packages, key=lambda p: p["name"])
 
 
-def course_id():
-    path = os.path.join(state_dir(), "kurs")
-    try:
-        with open(path, encoding="utf-8") as f:
-            value = f.read().strip()
-    except OSError:
-        return DEFAULT_COURSE
-    return value if COURSE_ID_RE.match(value) else DEFAULT_COURSE
+def manual_packages():
+    """Packages installed on purpose (not only as a dependency)."""
+    _, out = run(["apt-mark", "showmanual"], timeout=60)
+    return set(out.split())
+
+
+def collect_catalog(update=True):
+    problem = apt_update()[0] if update else None
+    packages = catalog_packages()
+    if not packages:
+        raise CliError(problem or "Die Paketquelle clawbook-apt kennt noch keine Pakete; "
+                                  "aktualisieren mit: clawbook pakete katalog")
+    installed = {p["name"]: p["version"] for p in installed_packages()}
+    for p in packages:
+        p["installiert"] = p["name"] in installed
+        p["installierte_version"] = installed.get(p["name"])
+    packages.sort(key=lambda p: (p["art"] != "kurs", p["name"]))
+    return {"aktualisiert": update and problem is None, "warnung": problem, "pakete": packages}
 
 
 def vscode_extensions():
-    """Container extensions from /usr/share/clawbook/vscode-extensions.d/*.list."""
+    """Container extensions from /usr/share/clawbook/vscode-extensions.d/*.list
+    (one list per installed technology package)."""
     result = []
     try:
         names = sorted(n for n in os.listdir(VSCODE_LISTS_DIR) if n.endswith(".list"))
@@ -507,67 +692,90 @@ def vscode_extensions():
     return result
 
 
-def collect_stand():
-    build = read_build()
-    return {
-        "format": 1,
-        "schnittstelle": SCHNITTSTELLE,
-        "datum": datetime.datetime.now(datetime.timezone.utc)
-                         .replace(microsecond=0).isoformat().replace("+00:00", "Z"),
-        "build": {"commit": build.get("commit"), "erstellt": build.get("built")},
-        "image": image_version(build),
-        "kennung": course_id(),
-        "pakete": installed_packages(),
-        "vscode": {"container": {"erweiterungen": vscode_extensions()}},
-    }
+# --- kurse -----------------------------------------------------------------
 
-
-def stand_path():
-    return os.path.join(state_dir(), "stand.json")
-
-
-def cmd_stand(opts):
-    s = collect_stand()
-    if opts["write"]:
-        write_user_file(stand_path(), dump_json(s))
-    if opts["json"]:
-        sys.stdout.write(dump_json(s))
-        return 0
-    print("clawbook - Stand")
-    print(f"  Datum:          {s['datum']}")
-    print(f"  Build:          {s['build']['commit'] or 'unbekannt'}")
-    print(f"  Image-Version:  {s['image'] or 'unbekannt'}")
-    print(f"  Kurs-Kennung:   {s['kennung']}")
-    if s["pakete"]:
-        print("  Pakete:")
-        for p in s["pakete"]:
-            print(f"    {p['name']:<24} {p['version']}  ({p['art']})")
-    else:
-        print("  Pakete:         keine")
-    exts = s["vscode"]["container"]["erweiterungen"]
-    print(f"  VS Code im Container: {', '.join(exts) if exts else 'keine Erweiterungen'}")
-    if opts["write"]:
-        print(f"Gespeichert in {stand_path()}")
-    return 0
-
-
-# --- kurs ------------------------------------------------------------------
-
-def cmd_kurs(opts, args):
-    if len(args) != 2 or args[0] != "vscode":
-        raise CliError("Aufruf: clawbook kurs vscode <kennung> [--json]", code=2)
-    kennung = args[1]
+def read_course(kennung):
     if not COURSE_ID_RE.match(kennung):
         raise CliError(f"„{kennung}“ ist keine gültige Kennung "
                        "(Kleinbuchstaben, Ziffern, Bindestrich).", code=2)
     path = os.path.join(KURSE_DIR, kennung, "vscode.json")
     try:
-        with open(path, encoding="utf-8-sig") as f:
-            data = json.load(f)
+        data = read_json(path)
     except FileNotFoundError:
-        raise CliError(f"Für „{kennung}“ gibt es keine Kursbeschreibung ({path}).")
+        raise CliError(f"Für „{kennung}“ gibt es keine Kursbeschreibung ({path}); "
+                       "installierte Kurse zeigt: clawbook kurse")
     except (OSError, ValueError) as e:
         raise CliError(f"Die Kursbeschreibung {path} ist fehlerhaft: {e}")
+    if not isinstance(data, dict):
+        raise CliError(f"Die Kursbeschreibung {path} ist fehlerhaft: kein JSON-Objekt")
+    return data
+
+
+def installed_courses(packages=None):
+    """Installed courses [{kennung, titel, version}]: every course package
+    brings /usr/share/clawbook/kurse/<kennung>/vscode.json. The built-in
+    "clawbook" (no course) is not listed."""
+    if packages is None:
+        packages = installed_packages()
+    versions = {p["name"]: p["version"] for p in packages}
+    result = []
+    for path in sorted(glob.glob(os.path.join(KURSE_DIR, "*", "vscode.json"))):
+        kennung = os.path.basename(os.path.dirname(path))
+        if kennung == DEFAULT_COURSE or not COURSE_ID_RE.match(kennung):
+            continue
+        try:
+            data = read_json(path)
+        except (OSError, ValueError):
+            data = {}
+        titel = data.get("titel") if isinstance(data, dict) else None
+        result.append({"kennung": kennung, "titel": titel or kennung,
+                       "version": versions.get(kennung)})
+    return result
+
+
+def union(*lists):
+    result = []
+    for items in lists:
+        for item in items or []:
+            if isinstance(item, str) and item not in result:
+                result.append(item)
+    return result
+
+
+def merged_course(kennung):
+    """Course description for the VSCodePack of a course, format 1.
+
+    Windows extensions: built-in pack + course. Container extensions:
+    built-in pack + the lists of ALL installed technology packages + course
+    additions. Settings: built-in pack, course wins. All packs connect to
+    the same container and share its VS Code server, so every pack gets
+    the extensions for every installed tool (also for single technology
+    packages installed by hand). For "clawbook": the built-in pack plus all
+    technology packages."""
+    base = read_course(DEFAULT_COURSE)
+    course = base if kennung == DEFAULT_COURSE else read_course(kennung)
+
+    def part(data, key):
+        value = data.get(key)
+        return value if isinstance(value, dict) else {}
+
+    result = dict(course)
+    result["windows"] = dict(part(course, "windows"), erweiterungen=union(
+        part(base, "windows").get("erweiterungen"), part(course, "windows").get("erweiterungen")))
+    result["container"] = dict(part(course, "container"), erweiterungen=union(
+        part(base, "container").get("erweiterungen"), vscode_extensions(),
+        part(course, "container").get("erweiterungen")))
+    settings = dict(part(base, "einstellungen"))
+    settings.update(part(course, "einstellungen"))
+    result["einstellungen"] = settings
+    return result
+
+
+def cmd_kurs(opts, args):
+    if len(args) != 2 or args[0] != "vscode":
+        raise CliError("Aufruf: clawbook kurs vscode <kennung> [--json]", code=2)
+    kennung = args[1]
+    data = merged_course(kennung)
     if opts["json"]:
         sys.stdout.write(dump_json(data))
         return 0
@@ -576,21 +784,684 @@ def cmd_kurs(opts, args):
     print(f"  Ordner:   {data.get('ordner', '')}")
     for link in data.get("links") or []:
         print(f"  Link:     {link.get('titel', '')} - {link.get('url', '')}")
-    win = (data.get("windows") or {}).get("erweiterungen") or []
-    cont = (data.get("container") or {}).get("erweiterungen") or []
+    win = data["windows"]["erweiterungen"]
+    cont = data["container"]["erweiterungen"]
     print(f"  VS Code unter Windows:   {', '.join(win) if win else 'keine'}")
     print(f"  VS Code im Container:    {', '.join(cont) if cont else 'keine'}")
     return 0
 
 
+def cmd_kurse(opts):
+    courses = installed_courses()
+    if opts["json"]:
+        sys.stdout.write(dump_json({"kurse": courses}))
+        return 0
+    if not courses:
+        print("Es ist kein Kurs installiert (Kurse hinzufügen: clawbook, Menü 6).")
+        return 0
+    print("Installierte Kurse:")
+    for c in courses:
+        print(f"  {c['kennung']:<14} {c['titel']}  ({c['version'] or 'Version unbekannt'})")
+    return 0
+
+
+# --- stand -----------------------------------------------------------------
+
+def stand_path():
+    return os.path.join(state_dir(), "stand.json")
+
+
+def collect_stand():
+    build = read_build()
+    packages = installed_packages()
+    manual = manual_packages()
+    for p in packages:
+        p["manuell"] = p["name"] in manual
+    names = {p["name"] for p in packages}
+    # Not yet restored after a new image: keep them in the state, so that a
+    # "stand --write" in between does not lose them.
+    restore = restore_state()
+    pending = []
+    if restore["zustand"] in ("laeuft", "fehler"):
+        pending = [n for n in restore.get("pakete") or [] if n not in names]
+    return {
+        "format": STAND_FORMAT,
+        "schnittstelle": SCHNITTSTELLE,
+        "datum": now_text(),
+        "build": {"commit": build.get("commit"), "erstellt": build.get("built")},
+        "image": image_version(build),
+        "kurse": [c["kennung"] for c in installed_courses(packages)],
+        "pakete": packages,
+        "ausstehend": pending,
+        "vscode": {"container": {"erweiterungen": vscode_extensions()}},
+    }
+
+
+def write_stand():
+    s = collect_stand()
+    write_user_file(stand_path(), dump_json(s))
+    return s
+
+
+def cmd_stand(opts):
+    s = write_stand() if opts["write"] else collect_stand()
+    if opts["json"]:
+        sys.stdout.write(dump_json(s))
+        return 0
+    print("clawbook - Stand")
+    print(f"  Datum:          {s['datum']}")
+    print(f"  Build:          {s['build']['commit'] or 'unbekannt'}")
+    print(f"  Image-Version:  {s['image'] or 'unbekannt'}")
+    print(f"  Kurse:          {', '.join(s['kurse']) if s['kurse'] else 'keine'}")
+    if s["pakete"]:
+        print("  Pakete:")
+        for p in s["pakete"]:
+            how = "" if p["manuell"] else ", als Abhängigkeit"
+            print(f"    {p['name']:<24} {p['version']}  ({p['art']}{how})")
+    else:
+        print("  Pakete:         keine")
+    if s["ausstehend"]:
+        print(f"  Noch nicht wiederhergestellt: {', '.join(s['ausstehend'])}")
+    exts = s["vscode"]["container"]["erweiterungen"]
+    print(f"  VS Code im Container: {', '.join(exts) if exts else 'keine Erweiterungen'}")
+    if opts["write"]:
+        print(f"Gespeichert in {stand_path()}")
+    return 0
+
+
 # --- pakete ----------------------------------------------------------------
 
-def cmd_pakete(opts):
+def say(opts, text=""):
+    """Progress text: on stderr for --json (stdout carries only JSON)."""
+    print(text, file=sys.stderr if opts["json"] else sys.stdout, flush=True)
+
+
+def stream(cmd, opts, env=None):
+    """Runs a command with its output visible (stderr for --json). Asks on
+    the terminal only without --yes/--json. Returns the exit code."""
+    target = sys.stderr if opts["json"] else None
+    interactive_run = not opts["json"] and not opts["yes"] and is_terminal()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    try:
+        return subprocess.run(cmd, stdin=None if interactive_run else subprocess.DEVNULL,
+                              stdout=target, stderr=target, check=False,
+                              env=dict(os.environ, **env) if env else None).returncode
+    except OSError as e:
+        raise CliError(f"{cmd[0]} ließ sich nicht starten: {e}")
+
+
+def check_names(names, verb):
+    if not names:
+        raise CliError(f"Aufruf: clawbook pakete {verb} <name...> [--yes] [--json]", code=2)
+    for name in names:
+        if not PACKAGE_RE.match(name):
+            raise CliError(f"„{name}“ ist kein Paket von clawbook "
+                           "(Namen beginnen mit clawbook- oder kurs-).", code=2)
+
+
+def need_confirmation(opts, verb):
+    if not opts["yes"] and (opts["json"] or not is_terminal()):
+        raise CliError(f"Ohne Terminal braucht „clawbook pakete {verb}“ die Bestätigung --yes.",
+                       code=2)
+
+
+def restore_hint(opts):
+    if restore_summary()["zustand"] == "laeuft":
+        say(opts, "Hinweis: Die Wiederherstellung der Pakete läuft noch. Die Installation "
+                  "wartet, bis sie fertig ist; die Paketlisten werden dabei vielleicht nicht "
+                  "aktualisiert.")
+
+
+def wait_for_restore(opts):
+    """Waits until a running restore has ended (at most one hour)."""
+    deadline = time.time() + 3600
+    told = False
+    while restore_summary()["zustand"] == "laeuft" and time.time() < deadline:
+        if not told:
+            say(opts, "Die Wiederherstellung der Pakete läuft noch; clawbook wartet, bis sie "
+                      f"fertig ist (Fortschritt: {restore_log_path()}) ...")
+            told = True
+        time.sleep(5)
+
+
+def cmd_pakete_katalog(opts):
+    if not opts["json"]:
+        print("Paketquellen werden aktualisiert ...", flush=True)
+    cat = collect_catalog()
     if opts["json"]:
-        sys.stdout.write(dump_json({"verfuegbar": False}))
+        sys.stdout.write(dump_json(cat))
+        return 0
+    if cat["warnung"]:
+        print(f"Warnung: {cat['warnung']}")
+    for art, heading in (("kurs", "Kurse"), ("technik", "Technikpakete")):
+        items = [p for p in cat["pakete"] if p["art"] == art]
+        if not items:
+            continue
+        print(f"{heading}:")
+        for p in items:
+            mark = "installiert" if p["installiert"] else "-"
+            print(f"  {p['name']:<22} {p['version'] or '':<10} {mark:<12} {p['beschreibung']}")
+    print("Hinzufügen: clawbook pakete add <name>   Entfernen: clawbook pakete remove <name>")
+    return 0
+
+
+def cmd_pakete_add(opts, names):
+    check_names(names, "add")
+    need_confirmation(opts, "add")
+    restore_hint(opts)
+    say(opts, "Paketquellen werden aktualisiert ...")
+    problem = apt_update()[0]
+    if problem:
+        say(opts, f"Warnung: {problem}")
+    known = {p["name"] for p in catalog_packages()}
+    unknown = [n for n in names if n not in known]
+    if unknown:
+        raise CliError("Nicht in der Paketquelle: " + ", ".join(unknown)
+                       + (f" ({problem})" if problem else
+                          " (alle Pakete zeigt: clawbook pakete katalog)"))
+    rc = stream(apt_get(["install"] + (["-y"] if opts["yes"] else []) + names), opts)
+    if rc != 0:
+        raise CliError(f"Die Installation ist fehlgeschlagen oder wurde abgebrochen (apt-get {rc}).")
+    restore_forget(names)
+    write_stand()
+    installed = {p["name"] for p in installed_packages()}
+    result = {"aktion": "add", "pakete": names,
+              "installiert": sorted(n for n in names if n in installed),
+              "stand": stand_path(), "vorladen": preload_after_add(opts, installed)}
+    if opts["json"]:
+        sys.stdout.write(dump_json(result))
     else:
-        print("Technikpakete und Kurse kommen mit einer späteren Version von clawbook.")
-    return 2
+        print(f"Installiert: {', '.join(result['installiert'])}. Stand gespeichert in {stand_path()}.")
+        courses = [n for n in names if n.startswith("kurs-")]
+        if courses:
+            print("Für VS Code unter Windows: Das passende VSCodePack richtet das Windows-Skript ein.")
+    return 0
+
+
+def simulated_removals(args):
+    """Package names apt-get would remove (simulation, needs no root)."""
+    _, out = run(["apt-get", "-s"] + args, timeout=300, env={"LC_ALL": "C.UTF-8"})
+    return {m.group(1) for m in re.finditer(r"^Remv (\S+)", out, re.MULTILINE)}
+
+
+def cmd_pakete_remove(opts, names):
+    check_names(names, "remove")
+    need_confirmation(opts, "remove")
+    # A package still pending in a running restore would be installed after
+    # the removal: wait for the restore first, then remove as usual.
+    if set(names) & set(restore_summary()["pakete"]):
+        wait_for_restore(opts)
+    restore_forget(names)
+    installed = {p["name"] for p in installed_packages()}
+    todo = [n for n in names if n in installed]
+    missing = [n for n in names if n not in installed]
+    if todo:
+        # The packages plus the dependencies only they needed - but not the
+        # packages of the image that were already orphaned before.
+        orphans_before = simulated_removals(["autoremove"])
+        targets = simulated_removals(["remove", "--autoremove"] + todo) - orphans_before
+        targets = sorted(targets | set(todo))
+        rc = stream(apt_get(["remove"] + (["-y"] if opts["yes"] else []) + targets), opts)
+        if rc != 0:
+            raise CliError(f"Das Entfernen ist fehlgeschlagen oder wurde abgebrochen "
+                           f"(apt-get {rc}).")
+    write_stand()
+    after = {p["name"] for p in installed_packages()}
+    result = {"aktion": "remove", "pakete": names,
+              "entfernt": sorted(n for n in todo if n not in after),
+              "nicht_installiert": missing, "stand": stand_path()}
+    if opts["json"]:
+        sys.stdout.write(dump_json(result))
+    else:
+        if result["entfernt"]:
+            print(f"Entfernt: {', '.join(result['entfernt'])}. Stand gespeichert in {stand_path()}.")
+        if missing:
+            print(f"Nicht installiert: {', '.join(missing)}")
+    return 0
+
+
+# PlatformIO: the platform for ESP32 (pioarduino, Arduino core 3.x) with
+# toolchain and framework takes about 6 GB in ~/.platformio (measured: the
+# toolchains are kept twice, in packages/ and tools/). clawbook loads it
+# once after the course (DEC-063) by building a throwaway project, so
+# that the first real build neither waits nor needs the network.
+
+PIO_INTRO = """
+PlatformIO für ESP32 vorladen
+-----------------------------
+Für den ersten Build braucht PlatformIO die ESP32-Plattform (pioarduino mit
+Arduino-Framework) samt Compiler: etwa 6 GB, die in deinem Home landen
+(~/.platformio). Das dauert je nach Verbindung 2 bis 20 Minuten. Machst du
+es jetzt, geht später der erste Build schnell und auch ohne Internet."""
+
+PIO_INI = """\
+; Throwaway project of "clawbook pakete vorladen"
+[env:esp32dev]
+platform = {url}
+board = esp32dev
+framework = arduino
+"""
+
+PIO_MAIN = """\
+#include <Arduino.h>
+
+void setup() {}
+
+void loop() {}
+"""
+
+
+def platformio_dir():
+    return os.path.join(user_home(), ".platformio")
+
+
+def platformio_ready():
+    root = platformio_dir()
+    return (bool(glob.glob(os.path.join(root, "platforms", "espressif32*")))
+            and bool(glob.glob(os.path.join(root, "packages", "framework-arduinoespressif32*"))))
+
+
+def preload_platformio(opts):
+    pio = shutil.which("pio")
+    if not pio:
+        raise CliError("PlatformIO fehlt: zuerst clawbook pakete add clawbook-embedded "
+                       "(oder kurs-iot).")
+    say(opts, "PlatformIO lädt jetzt die ESP32-Plattform (etwa 6 GB) und baut ein "
+              "Testprojekt. Bitte warten ...")
+    start = time.time()
+    tmp = tempfile.mkdtemp(prefix="clawbook-pio-")
+    try:
+        os.makedirs(os.path.join(tmp, "src"))
+        with open(os.path.join(tmp, "platformio.ini"), "w", encoding="utf-8") as f:
+            f.write(PIO_INI.format(url=PIO_PLATFORM_URL))
+        with open(os.path.join(tmp, "src", "main.cpp"), "w", encoding="utf-8") as f:
+            f.write(PIO_MAIN)
+        for path in (tmp, os.path.join(tmp, "src"), os.path.join(tmp, "platformio.ini"),
+                     os.path.join(tmp, "src", "main.cpp")):
+            chown_to_user(path)
+        rc = stream(as_user(["env", f"HOME={user_home()}", "PLATFORMIO_SETTING_ENABLE_TELEMETRY=No",
+                             pio, "run", "-d", tmp]), dict(opts, yes=True))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    seconds = int(time.time() - start)
+    size = dir_size(platformio_dir())
+    ok = rc == 0 and platformio_ready()
+    if ok:
+        say(opts, f"PlatformIO ist vorgeladen ({seconds // 60} min {seconds % 60} s); "
+                  f"~/.platformio belegt {human_bytes(size)}.")
+    else:
+        say(opts, f"Das Vorladen hat nicht geklappt (pio {rc}). Später erneut: "
+                  "clawbook pakete vorladen")
+    return {"vorhanden": platformio_ready(), "ausgefuehrt": True, "ok": ok,
+            "bytes": size, "dauer_s": seconds}
+
+
+def preload_after_add(opts, installed):
+    """After adding packages: PlatformIO for kurs-iot / clawbook-embedded.
+    --vorladen does it, a terminal asks, otherwise only a hint."""
+    if not installed & set(PIO_PACKAGES):
+        return None
+    if platformio_ready():
+        return {"vorhanden": True, "ausgefuehrt": False, "ok": None, "bytes": None,
+                "dauer_s": None}
+    if opts["vorladen"]:
+        return preload_platformio(opts)
+    if not opts["json"] and not opts["yes"] and is_terminal():
+        print(PIO_INTRO)
+        if ask_yes("PlatformIO jetzt vorladen?"):
+            return preload_platformio(opts)
+    say(opts, "PlatformIO vorladen (etwa 6 GB) später mit: clawbook pakete vorladen")
+    return {"vorhanden": False, "ausgefuehrt": False, "ok": None, "bytes": None, "dauer_s": None}
+
+
+def cmd_pakete_vorladen(opts):
+    if platformio_ready():
+        result = {"vorhanden": True, "ausgefuehrt": False, "ok": True,
+                  "bytes": dir_size(platformio_dir()), "dauer_s": None}
+        say(opts, f"PlatformIO ist schon vorgeladen (~/.platformio belegt "
+                  f"{human_bytes(result['bytes'])}).")
+    else:
+        if not opts["json"] and is_terminal():
+            print(PIO_INTRO)
+        result = preload_platformio(opts)
+    if opts["json"]:
+        sys.stdout.write(dump_json(result))
+    return 0 if result["ok"] else 1
+
+
+def cmd_pakete(opts, args):
+    usage = ("Aufruf: clawbook pakete katalog | add <name...> | remove <name...> | vorladen "
+             "[--yes] [--vorladen] [--json]")
+    if not args:
+        if opts["json"] or not is_terminal():
+            raise CliError(usage, code=2)
+        menu_pakete()
+        return 0
+    sub, rest = args[0], args[1:]
+    if sub == "katalog" and not rest:
+        return cmd_pakete_katalog(opts)
+    if sub == "add":
+        return cmd_pakete_add(opts, rest)
+    if sub == "remove":
+        return cmd_pakete_remove(opts, rest)
+    if sub == "vorladen" and not rest:
+        return cmd_pakete_vorladen(opts)
+    raise CliError(usage, code=2)
+
+
+# --- wiederherstellen ------------------------------------------------------
+# Installed packages live in the container's writable layer and are gone
+# after a new image. ~/.clawbook/stand.json (home volume) names them:
+# cont-init.d/10-clawbook notes the missing ones ("--pruefen", fast), the
+# s6 service clawbook-restore installs them in the background ("--dienst"),
+# from the apt cache in the home volume where possible.
+
+RESTORE_STATES = ("keine", "laeuft", "fertig", "fehler")
+
+
+def restore_path():
+    return os.path.join(state_dir(), RESTORE_JSON)
+
+
+def restore_log_path():
+    return os.path.join(state_dir(), RESTORE_LOG)
+
+
+def restore_state():
+    try:
+        data = read_json(restore_path())
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict) or data.get("zustand") not in RESTORE_STATES:
+        return {"zustand": "keine", "pakete": []}
+    return data
+
+
+def restore_save(state):
+    write_user_file(restore_path(), dump_json(state))
+
+
+def restore_summary():
+    s = restore_state()
+    summary = {"zustand": s["zustand"], "pakete": s.get("pakete") or [],
+               "meldung": s.get("meldung"), "beginn": s.get("beginn"), "ende": s.get("ende"),
+               "download": s.get("download"), "log": restore_log_path()}
+    if s["zustand"] == "laeuft" and isinstance(s.get("pid"), int) and not restore_running(s):
+        summary.update(zustand="fehler", meldung="Die Wiederherstellung wurde abgebrochen; "
+                                                 "erneut versuchen: clawbook wiederherstellen")
+    return summary
+
+
+def restore_forget(names):
+    """Packages added or removed by hand are no longer pending."""
+    state = restore_state()
+    pending = state.get("pakete") or []
+    if state["zustand"] in ("laeuft", "fehler") and set(names) & set(pending):
+        state["pakete"] = [n for n in pending if n not in names]
+        if not state["pakete"] and state["zustand"] == "fehler":
+            state["zustand"] = "fertig"
+            state["meldung"] = None
+        restore_save(state)
+
+
+def stand_wanted():
+    """Packages ~/.clawbook/stand.json asks for: those installed on purpose
+    (dependencies follow) plus the ones still pending. Stand format 1 has
+    no "manuell": then all of them."""
+    try:
+        data = read_json(stand_path())
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    wanted = []
+    for p in data.get("pakete") or []:
+        if isinstance(p, dict) and p.get("manuell", True):
+            wanted.append(p.get("name"))
+    wanted += data.get("ausstehend") or []
+    return union([n for n in wanted if isinstance(n, str) and PACKAGE_RE.match(n)])
+
+
+def restore_check():
+    installed = {p["name"] for p in installed_packages()}
+    missing = [n for n in stand_wanted() if n not in installed]
+    state = {"zustand": "laeuft" if missing else "keine", "pakete": missing,
+             "beginn": now_text() if missing else None, "ende": None, "meldung": None,
+             "download": None}
+    restore_save(state)
+    return state
+
+
+def restore_running(state):
+    """True when another clawbook is restoring right now."""
+    pid = state.get("pid")
+    if state["zustand"] != "laeuft" or not isinstance(pid, int):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def run_logged(cmd, log, echo):
+    """Runs cmd, appends its output to log (and the terminal); returns
+    (exit code, output)."""
+    lines = []
+    try:
+        p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT)
+    except OSError as e:
+        log.write(f"{cmd[0]}: {e}\n")
+        return 127, str(e)
+    for raw in p.stdout:
+        line = raw.decode("utf-8", "replace")
+        lines.append(line)
+        log.write(line)
+        log.flush()
+        if echo:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+    return p.wait(), "".join(lines)
+
+
+def deb_fields(path):
+    rc, out = run(["dpkg-deb", "-f", path, "Package", "Version", "Depends", "Pre-Depends",
+                   "Provides"])
+    fields = {}
+    if rc != 0:
+        return fields
+    key = None
+    for line in out.splitlines():
+        if line[:1] in (" ", "\t") and key:
+            fields[key] += " " + line.strip()
+        elif ":" in line:
+            key, value = line.split(":", 1)
+            key = key.strip().lower()
+            fields[key] = value.strip()
+    return fields
+
+
+def cached_debs_for(packages):
+    """Without package lists (offline, lists gone): the .deb files in the
+    apt cache that the packages need - the packages themselves and every
+    dependency that is not installed, following Depends/Pre-Depends.
+    Returns (files, names, unresolved)."""
+    archive = os.path.join(apt_dir(), "archives")
+    newest = {}
+    for path in glob.glob(os.path.join(archive, "*.deb")):
+        f = deb_fields(path)
+        name, version = f.get("package"), f.get("version")
+        if not name or not version:
+            continue
+        old = newest.get(name)
+        if old:
+            rc, _ = run(["dpkg", "--compare-versions", version, "gt", old[1]])
+            if rc != 0:
+                continue
+        newest[name] = (path, version, f)
+    provided = {}
+    for name, (_path, _version, f) in newest.items():
+        for prov in (f.get("provides") or "").split(","):
+            prov = prov.split("(")[0].strip()
+            if prov:
+                provided.setdefault(prov, name)
+    _, out = run(["dpkg-query", "-W", "-f=${Package}\t${db:Status-Abbrev}\t${Provides}\n"])
+    present = set()
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 2 and parts[1].startswith("ii"):
+            present.add(parts[0].split(":")[0])
+            for prov in (parts[2] if len(parts) > 2 else "").split(","):
+                if prov.strip():
+                    present.add(prov.split("(")[0].strip())
+    chosen, unresolved, todo = [], [], list(packages)
+    while todo:
+        name = todo.pop(0)
+        if name in chosen or name in present:
+            continue
+        name = name if name in newest else provided.get(name, name)
+        if name in chosen or name in present:
+            continue
+        if name not in newest:
+            unresolved.append(name)
+            continue
+        chosen.append(name)
+        f = newest[name][2]
+        deps = ",".join(x for x in (f.get("pre-depends"), f.get("depends")) if x)
+        for group in deps.split(","):
+            alts = [a.split("(")[0].split(":")[0].strip() for a in group.split("|")]
+            alts = [a for a in alts if a]
+            if not alts or any(a in present or a in chosen for a in alts):
+                continue
+            todo.append(next((a for a in alts if a in newest or a in provided), alts[0]))
+    return [newest[n][0] for n in chosen], chosen, unresolved
+
+
+def restore_run(packages, echo=False):
+    state = {"zustand": "laeuft", "pakete": packages, "beginn": now_text(), "ende": None,
+             "meldung": None, "download": None, "pid": os.getpid()}
+    restore_save(state)
+    log_path = restore_log_path()
+    write_user_file(log_path, "")
+    try:
+        with open(log_path, "a", encoding="utf-8") as log:
+            restore_steps(state, packages, log, echo)
+    except BaseException as e:
+        # Never leave "laeuft" behind (status would wait forever).
+        state.update(zustand="fehler", meldung=f"Die Wiederherstellung brach ab: {e!r}. "
+                                               "Erneut: clawbook wiederherstellen")
+        state["ende"] = now_text()
+        state.pop("pid", None)
+        restore_save(state)
+        raise
+    state["ende"] = now_text()
+    state.pop("pid", None)
+    with open(log_path, "a", encoding="utf-8") as log:
+        log.write(f"{state['ende']} Ergebnis: {state['zustand']}"
+                  + (f" - {state['meldung']}" if state["meldung"] else "")
+                  + (f" (Download {state['download']})" if state["download"] else "") + "\n")
+    if echo:
+        print(f"Ergebnis: {state['zustand']}")
+    restore_save(state)
+    write_stand()
+    return state
+
+
+def restore_steps(state, packages, log, echo):
+    def note(text):
+        log.write(text + "\n")
+        log.flush()
+        if echo:
+            print(text, flush=True)
+
+    note(f"{now_text()} Wiederherstellung: {' '.join(packages)}")
+    # An earlier run may have been stopped in the middle of dpkg.
+    note("--- dpkg --configure -a")
+    run_logged(as_root(["env", "DEBIAN_FRONTEND=noninteractive", "dpkg", "--configure", "-a"]),
+               log, echo)
+    note("--- apt-get update")
+    rc, out = run_logged(apt_get(["-q", "update"], c_locale=True), log, echo)
+    problem = apt_update_problem(rc, out)
+    if problem:
+        note(f"Hinweis: {problem}")
+    known = {p["name"] for p in catalog_packages()}
+    unavailable = [n for n in packages if n not in known]
+    available = [n for n in packages if n in known]
+    rc = 0
+    if available:
+        note("--- apt-get install " + " ".join(available))
+        rc, out = run_logged(apt_get(["-q", "-y", "install"] + available, c_locale=True),
+                             log, echo)
+        m = re.search(r"Need to get (\S+ \S+?)(?:/\S+ \S+)? of archives", out)
+        state["download"] = m.group(1) if m else ("0 B" if rc == 0 else None)
+    if unavailable and problem:
+        # No network and the package lists do not know them (e.g. lists
+        # gone): install straight from the .deb files in the apt cache.
+        files, names, unresolved = cached_debs_for(unavailable)
+        note(f"--- ohne Paketlisten aus dem Cache: {' '.join(names) or '-'}")
+        if files and not unresolved:
+            rc2, _ = run_logged(apt_get(["-q", "-y", "install"] + files, c_locale=True),
+                                log, echo)
+            if rc2 == 0:
+                deps = [n for n in names if n not in unavailable]
+                if deps:
+                    run_logged(as_root(["apt-mark", "auto"] + deps), log, echo)
+                unavailable = []
+                state["download"] = state["download"] or "0 B"
+            rc = rc or rc2
+        elif unresolved:
+            note("Nicht im Cache: " + ", ".join(unresolved))
+    if rc == 0 and not unavailable:
+        state.update(zustand="fertig", meldung=None)
+    elif rc == 0:
+        state.update(zustand="fehler", meldung=(
+            "Kein Netz, und im Paket-Cache fehlt etwas für: " if problem
+            else "Nicht in der Paketquelle: ") + ", ".join(unavailable))
+    else:
+        reason = (" Ohne Internet gelingt das nur, wenn alle Pakete im Cache liegen."
+                  if problem else "")
+        state.update(zustand="fehler",
+                     meldung=f"apt-get install ist fehlgeschlagen ({rc}).{reason} "
+                             f"Details: {restore_log_path()}")
+
+
+def cmd_wiederherstellen(opts):
+    if opts["pruefen"]:
+        state = restore_check()
+        if state["zustand"] == "laeuft":
+            print(f"Wiederherstellung: {', '.join(state['pakete'])} fehlen in diesem Image; "
+                  "sie werden im Hintergrund eingespielt (clawbook status, "
+                  f"{restore_log_path()}).")
+        return 0
+    if opts["dienst"]:
+        state = restore_state()
+        names = union([n for n in state.get("pakete") or []
+                       if isinstance(n, str) and PACKAGE_RE.match(n)])
+        if state["zustand"] != "laeuft" or not names:
+            return 0
+        state = restore_run(names)
+        print(f"Wiederherstellung: {state['zustand']}"
+              + (f" - {state['meldung']}" if state.get("meldung") else ""))
+        return 0 if state["zustand"] == "fertig" else 1
+    state = restore_state()
+    if restore_running(state):
+        raise CliError("Die Wiederherstellung läuft schon im Hintergrund "
+                       f"(Fortschritt: {restore_log_path()}).")
+    state = restore_check()
+    if state["zustand"] == "laeuft":
+        state = restore_run(state["pakete"], echo=not opts["json"])
+    if opts["json"]:
+        sys.stdout.write(dump_json(restore_summary()))
+    elif state["zustand"] == "keine":
+        print("Nichts wiederherzustellen: Alle Pakete aus dem Stand sind installiert.")
+    else:
+        print(f"Wiederherstellung: {state['zustand']}"
+              + (f" - {state['meldung']}" if state.get("meldung") else ""))
+    return 0 if state["zustand"] in ("keine", "fertig") else 1
 
 
 # --- github ----------------------------------------------------------------
@@ -826,13 +1697,13 @@ def set_menu_on_login(enabled):
 
 MENU = """
 clawbook - Menü
-  GitHub: {github}
+  GitHub: {github}{restore}
   1  Status
   2  Werkzeuge prüfen
   3  Schlüssel anzeigen
   4  Stand anzeigen
   5  Stand schreiben (~/.clawbook/stand.json)
-  6  Pakete und Kurse (noch nicht verfügbar)
+  6  Pakete und Kurse
   7  {github_item}
   8  {login_item}
   0  Beenden"""
@@ -840,7 +1711,7 @@ clawbook - Menü
 
 def plain(**kw):
     opts = {"json": False, "quiet": False, "private": False, "yes": False, "write": False,
-            "vor_wsm": False}
+            "vor_wsm": False, "vorladen": False, "pruefen": False, "dienst": False}
     opts.update(kw)
     return opts
 
@@ -869,6 +1740,91 @@ def menu_key():
         cmd_key_new(plain())
 
 
+def restore_menu_line():
+    r = restore_summary()
+    if r["zustand"] == "laeuft":
+        return f"\n  Pakete nach neuem Image: werden eingespielt ({', '.join(r['pakete'])})"
+    if r["zustand"] == "fehler":
+        return ("\n  Pakete nach neuem Image: FEHLER, siehe Status (1); "
+                "erneut: clawbook wiederherstellen")
+    return ""
+
+
+def menu_choose_packages(cat, art, heading, hint):
+    """Lists the packages of one kind; a number adds or removes one.
+    Returns "t" for the technology submenu, None to go back."""
+    items = [p for p in cat["pakete"] if p["art"] == art]
+    print()
+    print(heading)
+    if cat["warnung"]:
+        print(f"  Hinweis: {cat['warnung']}")
+    if restore_state()["zustand"] == "laeuft":
+        print("  Hinweis: Die Wiederherstellung nach dem neuen Image läuft noch.")
+    print(f"  {hint}")
+    for i, p in enumerate(items, 1):
+        mark = "[x]" if p["installiert"] else "[ ]"
+        print(f"  {i:>2}  {mark} {p['name']:<22} {p['beschreibung']}")
+    if art == "kurs":
+        print("   t  Technikpakete einzeln (für Fortgeschrittene)")
+    print("   Enter  zurück")
+    while True:
+        try:
+            choice = input("Deine Wahl: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if not choice or choice in ("0", "q", "x"):
+            return None
+        if choice == "t" and art == "kurs":
+            return "t"
+        if choice.isdigit() and 1 <= int(choice) <= len(items):
+            return items[int(choice) - 1]
+        print("Bitte eine Nummer aus der Liste wählen (Enter: zurück).")
+
+
+def menu_toggle(p):
+    """Adds or removes one package; apt shows what happens and asks."""
+    print()
+    if p["installiert"]:
+        print(f"{p['name']} entfernen. Technikpakete, die sonst niemand braucht, gehen mit;")
+        print("deine Dateien im Home bleiben.")
+        cmd_pakete_remove(plain(), [p["name"]])
+    else:
+        print(f"{p['name']} hinzufügen ({p['beschreibung']}).")
+        cmd_pakete_add(plain(), [p["name"]])
+
+
+def menu_pakete():
+    """Menu "Pakete und Kurse": courses first, single technology packages
+    as a submenu for advanced users (DEC-060)."""
+    print("Paketquellen werden aktualisiert ...", flush=True)
+    cat = collect_catalog()
+    art = "kurs"
+    while True:
+        if art == "kurs":
+            choice = menu_choose_packages(
+                cat, "kurs", "Pakete und Kurse - Kurse",
+                "Nummer: Kurs hinzufügen ([ ]) oder entfernen ([x]).")
+        else:
+            choice = menu_choose_packages(
+                cat, "technik", "Technikpakete einzeln (für Fortgeschrittene)",
+                "Nummer: Paket hinzufügen ([ ]) oder entfernen ([x]). "
+                "Kurse bringen ihre Pakete selbst mit.")
+        if choice is None:
+            if art == "kurs":
+                return
+            art = "kurs"
+            continue
+        if choice == "t":
+            art = "technik"
+            continue
+        try:
+            menu_toggle(choice)
+        except CliError as e:
+            print(f"Fehler: {e}")
+        cat = collect_catalog(update=False)
+
+
 def interactive():
     terminal = is_terminal()
     github = github_state() if terminal else {"angemeldet": False, "benutzer": None,
@@ -891,13 +1847,14 @@ def interactive():
         "3": menu_key,
         "4": lambda: cmd_stand(plain()),
         "5": lambda: cmd_stand(plain(write=True)),
-        "6": lambda: cmd_pakete(plain()),
+        "6": menu_pakete,
         "7": menu_github,
         "8": lambda: set_menu_on_login(not menu_on_login()),
     }
     while True:
         print(MENU.format(
             github=github_label(github),
+            restore=restore_menu_line(),
             github_item="GitHub-Anmeldung prüfen" if github["angemeldet"] else "GitHub anmelden",
             login_item=("Menü beim Anmelden per SSH nicht mehr zeigen" if menu_on_login()
                         else "Menü beim Anmelden per SSH wieder zeigen")))
@@ -926,7 +1883,8 @@ def interactive():
 # --- command line ----------------------------------------------------------
 
 FLAGS = {"--json": "json", "--quiet": "quiet", "-q": "quiet", "--private": "private",
-         "--yes": "yes", "-y": "yes", "--write": "write", "--vor-wsm": "vor_wsm"}
+         "--yes": "yes", "-y": "yes", "--write": "write", "--vor-wsm": "vor_wsm",
+         "--vorladen": "vorladen", "--pruefen": "pruefen", "--dienst": "dienst"}
 
 
 def version_text():
@@ -949,10 +1907,14 @@ def dispatch(words, opts):
                        code=2)
     if cmd == "stand" and not args:
         return cmd_stand(opts)
+    if cmd == "kurse" and not args:
+        return cmd_kurse(opts)
     if cmd == "kurs":
         return cmd_kurs(opts, args)
     if cmd == "pakete":
-        return cmd_pakete(opts)
+        return cmd_pakete(opts, args)
+    if cmd == "wiederherstellen" and not args:
+        return cmd_wiederherstellen(opts)
     if cmd == "github":
         return cmd_github(opts, args)
     raise CliError(f"Unbekannter Befehl: {' '.join(words)} (Hilfe: clawbook --help)",

@@ -1,0 +1,8 @@
+# clawbook-lehre: technology and course packages (clawbook-*, kurs-*).
+# Signed repository on GitHub Pages; the image trusts only its key.
+Types: deb
+URIs: https://schlingensiepen.github.io/clawbook-apt
+Suites: trixie
+Components: main
+Architectures: amd64
+Signed-By: /usr/share/keyrings/clawbook-apt.gpg
