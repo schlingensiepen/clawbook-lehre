@@ -276,15 +276,17 @@ sagt Ihnen, was es gerade tut:
 
 Am Ende zeigt das Skript einen grünen Kasten „clawbook
 läuft. So geht es weiter:" mit drei nummerierten
-Schritten: „1. Terminal: Öffne ein neues
-PowerShell-Fenster und gib ein: ssh clawbook",
-„2. VS Code: Befehl erneut ausführen, Menüpunkt [9]
-(richtet beim ersten Mal ein eigenes VS Code ein), oder im
-eigenen VS Code: Remote-SSH → clawbook → Ordner
-/home/student/source" und „3. Remotedesktop:
-mstsc /v:localhost:3390". Diesen Kasten sehen Sie bei
-jedem Start wieder; die Abschnitte 4 bis 6 erklären die
-drei Schritte ausführlich. Danach endet das Skript.
+Schritten: Terminal (`ssh clawbook` in einem neuen
+PowerShell-Fenster), VS Code und Remotedesktop
+(`mstsc /v:localhost:3390`). Beim Punkt VS Code steht,
+dass das Skript jetzt endet: Um VS Code einzurichten oder
+zu starten, starten Sie das Skript noch einmal — mit
+demselben Befehl wie eben (im selben Fenster: Pfeiltaste
+nach oben, Enter) — und wählen Menüpunkt [9]. Danach geht
+es auch über den Eintrag „clawbook VS Code" im Startmenü.
+Diesen Kasten sehen Sie bei jedem Start wieder; die
+Abschnitte 4 bis 6 erklären die drei Schritte
+ausführlich.
 
 ### Das Menü ab dem zweiten Aufruf
 
