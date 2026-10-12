@@ -17,6 +17,24 @@ Anführungszeichen. Die neueren Meldungen sprechen Sie mit
 „Sie" an, ältere und das Menü im Container noch mit „du";
 so stehen sie auch in den Zitaten.
 
+> **So kommen Sie hin**
+>
+> - **Verwaltungs-Skript** (unter Windows): PowerShell öffnen und den
+>   Befehl von der [Startseite](../README.md) ausführen —
+>   `irm https://raw.githubusercontent.com/schlingensiepen/clawbook-lehre/main/get-clawbook.ps1 | iex`.
+>   Im selben Fenster genügt später Pfeiltaste nach oben und Enter.
+>   Dort finden Sie **[11] Kurse und Technikpakete** und **[9] VS Code
+>   starten**.
+> - **VS Code**: über **[9] VS Code starten** oder den Startmenü-Eintrag
+>   „clawbook VS Code" (je Kurs „clawbook VS Code – <Kurs>").
+> - **Terminal im Container**: in VS Code im Menü **Terminal → Neues
+>   Terminal** (englisch *Terminal → New Terminal*), oder in PowerShell
+>   `ssh clawbook`. Befehle in `bash`-Blöcken tippen Sie dort, nicht in
+>   Windows.
+>
+> Begriffe wie Container, Home (`~`) oder VSCodePack erklärt das
+> [Glossar](README.md#begriffe).
+
 Inhalt:
 
 1. [Was Kurse und Technikpakete sind](#1-was-kurse-und-technikpakete-sind)
