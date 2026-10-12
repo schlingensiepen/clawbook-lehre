@@ -6,7 +6,10 @@
 # Starts the image with a fresh home volume and checks: healthcheck, all
 # tools (clawbook-check), build stamp, SSH login as "student" with the key
 # from the home volume, the CLI clawbook (JSON interface), the menu on SSH
-# login and the GitHub question (also in front of wsm), RDP port and
+# login and the GitHub question (also in front of wsm), the agent equipment
+# (MCP servers, skills and instructions in all five agents, keys via
+# "clawbook agenten schluessel", own entries kept, second sync idle), RDP
+# port and
 # XWayland display, browsers for playwright-cli, Playwright-MCP and
 # notebooklm as "student", Samba share
 # (read/write with the shown password), and that keys survive recreating
@@ -319,12 +322,120 @@ ssh_run 'git -C ~/source/samples/primer log --oneline -1 && test -f ~/source/sam
   || fail "sample project ~/source/samples/primer missing"
 echo "sample ok"
 
-# First start: the playwright-cli skill for Claude Code in the home, once.
-ssh_run 'test -f ~/.claude/skills/playwright-cli/SKILL.md && test -s ~/.clawbook/playwright-skill-eingerichtet' \
-  || fail "playwright-cli skill not installed in the home on the first start"
-grep -q "Playwright-Skill für Claude Code eingerichtet" <<<"${logs}" \
-  || fail "start log does not mention the playwright-cli skill"
-echo "playwright skill ok"
+# Agent equipment: after the start the service has carried MCP servers,
+# skills and instructions into all five agents; Stitch and Wiki.js wait
+# for their keys.
+agenten_done() {
+  for _ in $(seq 1 90); do
+    out=$(ssh_run 'clawbook agenten status --json' 2>/dev/null) || true
+    json_ok "${out}" 'd["letzter_sync"] is not None' 2>/dev/null && return 0
+    sleep 2
+  done
+  return 1
+}
+agenten_done || fail "agent sync did not run after the start: ${out}"
+json_ok "${out}" 'all(r["agenten"][a] == "eingetragen" for r in d["eintraege"] if r["name"] in ("playwright", "playwright-cli", "notebooklm", "graphify", "werkzeuge") for a in ("claude", "codex", "copilot", "opencode", "agy")) and {r["name"] for r in d["eintraege"]} >= {"playwright", "stitch", "wikijs", "playwright-cli", "notebooklm", "graphify", "werkzeuge"} and all(set(r["agenten"].values()) == {"schluessel_fehlt"} for r in d["eintraege"] if r["name"] in ("stitch", "wikijs")) and d["letzter_sync"]["ok"]' \
+  || fail "clawbook agenten status: unexpected after the start: ${out}"
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'set -e
+  claude mcp list </dev/null | grep -q "^playwright: playwright-mcp --headless"
+  codex mcp list --json </dev/null | python3 -c "import json,sys; sys.exit(0 if any(s[\"name\"] == \"playwright\" for s in json.load(sys.stdin)) else 1)"
+  copilot mcp list --json </dev/null | python3 -c "import json,sys; sys.exit(0 if \"playwright\" in json.load(sys.stdin)[\"mcpServers\"] else 1)"
+  timeout 120 opencode mcp list </dev/null 2>&1 | grep -q "playwright"
+  agy mcp list </dev/null | grep -q "^playwright "
+  for s in playwright-cli notebooklm graphify; do
+    for d in ~/.claude/skills ~/.agents/skills ~/.gemini/config/skills; do test -f "$d/$s/SKILL.md"; done
+  done
+  for f in ~/.claude/CLAUDE.md ~/.codex/AGENTS.md ~/.copilot/copilot-instructions.md ~/.config/opencode/AGENTS.md; do
+    grep -q ">>> clawbook agenten sync >>>" "$f"; grep -q "WorkspaceManager" "$f"
+  done
+  grep -q "trigger: always_on" ~/.gemini/config/rules/clawbook.md
+  grep -q "WorkspaceManager" ~/.gemini/config/rules/clawbook.md
+  ! claude mcp get stitch </dev/null >/dev/null 2>&1
+  ! grep -q stitch ~/.codex/config.toml ~/.copilot/mcp-config.json ~/.config/opencode/opencode.json ~/.gemini/config/mcp_config.json
+  test ! -e ~/CLAUDE.md && test ! -e ~/.opencode && test ! -e ~/GEMINI.md
+  test -z "$(find ~ -maxdepth 3 -user root -not -path "$HOME/.clawbook*")"' \
+  || fail "agent equipment after the start: MCP, skills or instructions missing, Stitch present or files of root in the home"
+out=$(ssh_run 'clawbook agenten sync') || fail "clawbook agenten sync failed: ${out}"
+if ! has 'Alles aktuell, nichts geändert' || ! has 'stitch .*fehlt STITCH_API_KEY' || ! has 'clawbook agenten schluessel STITCH_API_KEY'; then
+  fail "clawbook agenten sync: expected no change and the missing Stitch key: ${out}"
+fi
+# Own entries with other names survive (also comments in Codex' TOML and
+# OpenCode's JSONC); then the key for Stitch, given on stdin.
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'set -e
+  claude mcp add -s user eigener -- echo eigen </dev/null >/dev/null
+  printf "\n# eigener Kommentar\n[mcp_servers.eigener]\ncommand = \"echo\"\n" >> ~/.codex/config.toml
+  copilot mcp add eigener -- echo eigen </dev/null >/dev/null
+  agy mcp add eigener echo eigen </dev/null >/dev/null
+  python3 - <<PY
+import json
+p = "/home/student/.config/opencode/opencode.json"
+d = json.load(open(p))
+d["mcp"]["eigener"] = {"type": "local", "command": ["echo", "eigen"]}
+open(p, "w").write(json.dumps(d, indent=2).replace("{\n", "{\n  // eigener Kommentar\n", 1) + "\n")
+PY' || fail "could not add own MCP entries"
+out=$(ssh_run 'printf "smoke-schluessel-4711\n" | clawbook agenten schluessel STITCH_API_KEY') \
+  || fail "clawbook agenten schluessel STITCH_API_KEY failed: ${out}"
+if ! has 'Schlüssel STITCH_API_KEY gespeichert' || ! has 'Claude Code: +MCP stitch eingetragen' || has 'smoke-schluessel-4711'; then
+  fail "clawbook agenten schluessel: unexpected output (or the key was shown): ${out}"
+fi
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'set -e
+  test "$(stat -c "%U %a" ~/.clawbook/secrets)" = "student 600"
+  python3 - <<PY
+import json, tomllib
+h = "/home/student/"
+claude = json.load(open(h + ".claude.json"))["mcpServers"]
+assert claude["stitch"]["headers"] == {"X-Goog-Api-Key": "\${STITCH_API_KEY}"}, claude
+codex = tomllib.load(open(h + ".codex/config.toml", "rb"))["mcp_servers"]
+assert codex["stitch"]["env_http_headers"] == {"X-Goog-Api-Key": "STITCH_API_KEY"}, codex
+copilot = json.load(open(h + ".copilot/mcp-config.json"))["mcpServers"]
+assert copilot["stitch"]["headers"] == {"X-Goog-Api-Key": "\${STITCH_API_KEY}"}, copilot
+oc_text = open(h + ".config/opencode/opencode.json").read()
+assert "// eigener Kommentar" in oc_text and "{env:STITCH_API_KEY}" in oc_text, oc_text
+agy = json.load(open(h + ".gemini/config/mcp_config.json"))["mcpServers"]
+assert agy["stitch"]["headers"] == {"X-Goog-Api-Key": "smoke-schluessel-4711"}, agy
+for servers in (claude, codex, copilot, agy):
+    assert "eigener" in servers and "playwright" in servers, servers
+assert "eigener" in oc_text
+assert "# eigener Kommentar" in open(h + ".codex/config.toml").read()
+PY
+  test "$(stat -c %a ~/.gemini/config/mcp_config.json)" = 600
+  codex mcp list --json </dev/null >/dev/null
+  timeout 120 opencode mcp list </dev/null 2>&1 | grep -q stitch' \
+  || fail "Stitch not carried into every agent, or own entries lost"
+# The key reaches every kind of shell: ssh with a command, login shell,
+# interactive shell, docker exec (BASH_ENV) - but never root.
+# shellcheck disable=SC2016 # expands on the container side
+out=$(ssh_run 'echo "cmd=$STITCH_API_KEY"
+  env -i HOME=/home/student PATH=/usr/bin:/bin bash -lc "echo login=\$STITCH_API_KEY"
+  env -i HOME=/home/student PATH=/usr/bin:/bin PS1=x bash -ic "echo interactive=\$STITCH_API_KEY" 2>/dev/null
+  tmux new-session -d -s keytest "echo tmux=\$STITCH_API_KEY > /tmp/keytest; sleep 1"; sleep 2; cat /tmp/keytest; rm -f /tmp/keytest')
+for kind in cmd login interactive tmux; do
+  has "^${kind}=smoke-schluessel-4711$" || fail "STITCH_API_KEY missing in the ${kind} shell: ${out}"
+done
+# shellcheck disable=SC2016 # expands on the container side
+[ "$(docker exec -u student "${NAME}" bash -c 'echo "$STITCH_API_KEY"')" = smoke-schluessel-4711 ] \
+  || fail "STITCH_API_KEY missing for docker exec as student"
+# shellcheck disable=SC2016 # expands on the container side
+[ -z "$(docker exec "${NAME}" bash -c 'echo "${STITCH_API_KEY:-}"')" ] \
+  || fail "root sees the student's key"
+out=$(ssh_run 'clawbook agenten status; clawbook agenten status --json')
+has 'smoke-schluessel-4711' && fail "clawbook agenten status shows the key"
+# A second sync changes nothing (files identical).
+before=$(ssh_run 'md5sum ~/.claude.json ~/.codex/config.toml ~/.copilot/mcp-config.json ~/.config/opencode/opencode.json ~/.gemini/config/mcp_config.json ~/.claude/CLAUDE.md ~/.codex/AGENTS.md ~/.gemini/config/rules/clawbook.md')
+out=$(ssh_run 'clawbook agenten sync --json') || fail "second clawbook agenten sync failed: ${out}"
+json_ok "${out}" 'not d["geaendert"] and d["ok"] and [w["name"] for w in d["weggelassen"]] == ["wikijs"]' \
+  || fail "second clawbook agenten sync changed something: ${out}"
+[ "$(ssh_run 'md5sum ~/.claude.json ~/.codex/config.toml ~/.copilot/mcp-config.json ~/.config/opencode/opencode.json ~/.gemini/config/mcp_config.json ~/.claude/CLAUDE.md ~/.codex/AGENTS.md ~/.gemini/config/rules/clawbook.md')" = "${before}" ] \
+  || fail "second clawbook agenten sync rewrote files"
+# Removing the key takes Stitch out again, own entries stay.
+ssh_run 'clawbook agenten schluessel STITCH_API_KEY --entfernen >/dev/null' \
+  || fail "clawbook agenten schluessel --entfernen failed"
+ssh_run '! grep -q stitch ~/.codex/config.toml ~/.copilot/mcp-config.json ~/.config/opencode/opencode.json ~/.gemini/config/mcp_config.json && ! claude mcp get stitch </dev/null >/dev/null 2>&1 && claude mcp get eigener </dev/null >/dev/null' \
+  || fail "Stitch not removed after the key was removed, or own entries lost"
+echo "agent equipment ok"
 
 # RDP: Weston answers and XWayland provides display :0.
 timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/${RDP_PORT}" \

@@ -13,8 +13,10 @@
 # 4. Prepares the apt package cache in the home volume.
 # 5. Notes packages from ~/.clawbook/stand.json that are not installed
 #    (after a new image); the service clawbook-restore installs them.
-# 6. Once per home: the playwright-cli skill for Claude Code in
-#    ~/.claude/skills (marker in ~/.clawbook).
+# 6. Prepares the agent equipment: ~/.clawbook/agenten (work directory of
+#    "clawbook agenten sync") and ~/.clawbook/agenten.d (own entries). The
+#    sync itself runs in the service clawbook-restore after the restore,
+#    so SSH does not wait for it.
 #
 # Settings (environment variables, shown only):
 #   CLAWBOOK_SSH_PORT  host port mapped to SSH port 22   (default 2222)
@@ -138,27 +140,10 @@ install -d -m 0700 -o _apt -g root \
 /usr/local/bin/clawbook wiederherstellen --pruefen \
   || echo "Warnung: Wiederherstellung der Pakete nicht geprüft (clawbook status)."
 
-# 6. Once per home: "playwright-cli install --skills" in the home, so that
-#    Claude Code finds the skill in every project (~/.claude/skills/
-#    playwright-cli; it also writes ~/.playwright/cli.config.json with
-#    Chromium). The skill ships with the npm package, no download: measured
-#    well below a second, also without network. The time limit only guards
-#    the start against a hanging call. Without success no marker, so the
-#    next start tries again; a skill deleted later stays deleted.
-PW_MARKER=${STATE_DIR}/playwright-skill-eingerichtet
-if [ ! -e "${PW_MARKER}" ]; then
-  # Output to a file, not through $(...): a leftover background process
-  # holding the pipe could otherwise keep the start waiting.
-  PW_LOG=$(mktemp)
-  if (cd "${USER_HOME}" && runuser -u "${USER_NAME}" -- \
-        timeout -k 5 60 playwright-cli install --skills </dev/null >"${PW_LOG}" 2>&1) \
-     && [ -f "${USER_HOME}/.claude/skills/playwright-cli/SKILL.md" ]; then
-    echo "Playwright-Skill für Claude Code eingerichtet: ~/.claude/skills/playwright-cli"
-    date -u +%Y-%m-%dT%H:%M:%SZ > "${PW_MARKER}"
-    chown "${USER_NAME}:${USER_NAME}" "${PW_MARKER}"
-  else
-    echo "Warnung: Playwright-Skill nicht eingerichtet (nächster Start versucht es erneut):"
-    tail -n 5 "${PW_LOG}"
-  fi
-  rm -f "${PW_LOG}"
+# 6. Agent equipment: directories owned by student; keys stay private.
+install -d -m 0755 -o "${USER_NAME}" -g "${USER_NAME}" \
+  "${STATE_DIR}/agenten" "${STATE_DIR}/agenten.d"
+if [ -e "${STATE_DIR}/secrets" ]; then
+  chown "${USER_NAME}:${USER_NAME}" "${STATE_DIR}/secrets"
+  chmod 0600 "${STATE_DIR}/secrets"
 fi

@@ -43,6 +43,9 @@ verbinden, steht in der [Installation](docs/installation.md).
   Bildschirm
 - [Setup](docs/setup/README.md) — Accounts je Anbieter
   anlegen und die Werkzeuge im Container anmelden
+- [Agenten-Ausstattung](docs/agenten-ausstattung.md) —
+  MCP-Server, Skills und Hinweise kommen bei allen
+  Agenten an; Schlüssel für Stitch und Wiki.js setzen
 - [Kurse und Technikpakete](docs/kurse-und-pakete.md) —
   Werkzeuge für eine Lehrveranstaltung hinzufügen
   (Java, .NET, Datenbanken, ESP32 …) und je Kurs ein
@@ -104,7 +107,10 @@ mitarbeiten; Studierende brauchen ihn nicht.
   (`etc/services.d`, gestartet von s6-overlay),
   Befehl `clawbook` (Menü, GitHub-Anmeldung, Prüfung,
   Kurse und Technikpakete, Wiederherstellung nach einem
-  neuen Image; `clawbook-check` als kurzer Aufruf),
+  neuen Image, Agenten-Ausstattung; `clawbook-check` als
+  kurzer Aufruf), Einträge der Agenten-Ausstattung
+  (`usr/share/clawbook/agenten.d`, Format in
+  [Agenten-Ausstattung](docs/agenten-ausstattung.md)),
   Paketquelle und Paket-Cache im Home (`etc/apt`),
   Voreinstellungen
 - `deploy/smoke-test.sh`, `deploy/check-versions.sh` —

@@ -1,0 +1,9 @@
+{
+  "art": "mcp",
+  "name": "stitch",
+  "beschreibung": "Google Stitch: Oberflächen-Entwürfe (Schlüssel aus Stitch, Settings, API Keys)",
+  "transport": "http",
+  "url": "https://stitch.googleapis.com/mcp",
+  "headers": {"X-Goog-Api-Key": "${STITCH_API_KEY}"},
+  "benoetigt": ["STITCH_API_KEY"]
+}

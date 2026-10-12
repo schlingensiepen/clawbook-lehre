@@ -18,13 +18,16 @@ Dinge:
   in ein Notizbuch und stellst Fragen dazu oder lässt
   Zusammenfassungen, Podcasts und Quizze erzeugen. Im
   clawbook steuerst du es von der Kommandozeile, und
-  Claude Code kann es über den Skill `/notebooklm`
-  nutzen.
+  alle Agenten können es über den Skill `notebooklm`
+  nutzen (den richtet clawbook ein, siehe
+  [Agenten-Ausstattung](../agenten-ausstattung.md)).
 - **Stitch** — Googles Werkzeug für
-  Oberflächen-Entwürfe aus Textbeschreibungen. Claude
-  Code spricht damit über einen **MCP-Server**, einen
-  Dienst im Netz, der dem Agenten Werkzeuge anbietet.
-  Im Container ist dafür nichts zu installieren.
+  Oberflächen-Entwürfe aus Textbeschreibungen. Die
+  Agenten sprechen damit über einen **MCP-Server**,
+  einen Dienst im Netz, der dem Agenten Werkzeuge
+  anbietet. Im Container ist dafür nichts zu
+  installieren; clawbook trägt Stitch bei allen Agenten
+  ein, sobald Sie den Schlüssel gesetzt haben.
 
 **Kosten (Stand 2026-10-05):** Alle drei haben eine
 kostenlose Stufe mit einem Google-Konto. Antigravity:
@@ -172,12 +175,44 @@ unvollständig oder nicht angemeldet) — dort ohne
 Anfrage an NotebookLM, also auch ohne Internet. Die Daten liegen in
 `~/.notebooklm/` — nicht weitergeben.
 
-### Stitch als MCP-Server für Claude Code
+### Stitch für alle Agenten
 
-Den Schlüssel aus dem Abschnitt „Beim Anbieter" trägst
-du einmal in Claude Code ein. Damit er nicht in der
-Befehlshistorie landet, fragst du ihn erst unsichtbar
-ab (Muster in der [Übersicht](README.md), Regel 2):
+**Das tun Sie selbst:** den Schlüssel aus dem
+Abschnitt „Beim Anbieter“ einmal im Container
+eingeben:
+
+```bash
+clawbook agenten schluessel STITCH_API_KEY
+```
+
+clawbook fragt „Wert für STITCH_API_KEY (Eingabe bleibt
+unsichtbar):“. Schlüssel einfügen, Enter. Er landet in
+`~/.clawbook/secrets` (nur für Sie lesbar), nicht in der
+Befehlshistorie. Das geht auch im clawbook-Menü, Punkt
+10, dann `k`.
+
+**Das erledigt clawbook:** Gleich danach trägt es Stitch
+bei Claude Code, Codex, Copilot CLI, OpenCode und
+Antigravity ein und meldet je Agent „MCP stitch
+eingetragen“. In den Einstellungen steht nur der
+Verweis `${STITCH_API_KEY}`; den Wert bekommen die
+Agenten in jedem neuen Terminal als Umgebungsvariable.
+Nur Antigravity kann keine Verweise auflösen; dort steht
+der Schlüssel im Klartext in
+`~/.gemini/config/mcp_config.json`, die Datei ist nur
+für Sie lesbar. Einzelheiten:
+[Agenten-Ausstattung](../agenten-ausstattung.md).
+
+Mehr ist nicht zu tun: Der Dienst läuft bei Google.
+Starten Sie den Agenten (neu) und bitten Sie in
+natürlicher Sprache um Entwürfe („Entwirf mit Stitch
+eine Anmeldeseite für …“); der Agent nutzt die
+Stitch-Werkzeuge selbst.
+
+**Falls die Automatik nicht geht:** Stitch von Hand nur
+bei Claude Code eintragen. Den Schlüssel fragen Sie
+dafür unsichtbar ab (Muster in der
+[Übersicht](README.md), Regel 2):
 
 ```bash
 read -rs KEY
@@ -190,14 +225,11 @@ unset KEY
 Die Reihenfolge ist wichtig: `--header` steht am Ende.
 Davor geschrieben, hält Claude Code auch die Adresse
 für einen Header und bricht mit „missing required
-argument 'commandOrUrl'" ab.
-
-`-s user` heißt: gilt für alle deine Projekte;
-gespeichert in `~/.claude.json`. Mehr ist nicht zu tun:
-Der Dienst läuft bei Google. In Claude Code bittest du
-danach in natürlicher Sprache um Entwürfe („Entwirf
-mit Stitch eine Anmeldeseite für …"); der Agent nutzt
-die Stitch-Werkzeuge selbst.
+argument 'commandOrUrl'" ab. `-s user` heißt: gilt für
+alle Ihre Projekte; gespeichert in `~/.claude.json`. Die
+Wege für die anderen Agenten stehen in der
+[Agenten-Ausstattung](../agenten-ausstattung.md),
+„Falls die Automatik nicht geht“.
 
 ## Prüfen
 
@@ -218,12 +250,18 @@ Konto eine leere Liste, aber keinen Fehler).
 Stitch:
 
 ```bash
+clawbook agenten
 claude mcp list
 ```
 
-zeigt `stitch` mit „Connected". In einer
-Claude-Code-Sitzung zeigt `/mcp` die Werkzeuge des
-Servers.
+Der erste Befehl zeigt in der Zeile `stitch` bei jedem
+Agenten `ja`; steht dort `SCHLÜSSEL`, fehlt der
+Schlüssel noch. Der zweite zeigt `stitch` mit
+„Connected". In einer Claude-Code-Sitzung zeigt `/mcp`
+die Werkzeuge des Servers. „Connected“ allein beweist
+nicht, dass der Schlüssel stimmt (Stitch antwortet auf
+die Probe auch mit falschem Schlüssel); erst ein
+echter Entwurf zeigt es.
 
 ## Typische Fehler
 
@@ -259,19 +297,28 @@ Servers.
   Browser zu starten** → Per `ssh clawbook` neu
   verbinden; `agy` erkennt die SSH-Sitzung an deren
   Umgebungsvariablen.
-- **`claude mcp list` zeigt `stitch` als „Failed to
-  connect"** → Schlüssel falsch kopiert oder in Stitch
-  gelöscht. Mit `claude mcp remove -s user stitch`
-  entfernen und neu eintragen; Anführungszeichen um
-  den Header beachten.
+- **`clawbook agenten` zeigt bei `stitch`
+  `SCHLÜSSEL`** → Der Schlüssel ist noch nicht gesetzt:
+  `clawbook agenten schluessel STITCH_API_KEY`.
+- **`claude mcp list` warnt „Missing environment
+  variables: STITCH_API_KEY"** → Das Terminal ist älter
+  als der Schlüssel. Neues Terminal öffnen (oder
+  `. /etc/profile.d/clawbook-secrets.sh`) und den Agenten
+  neu starten.
+- **Stitch-Aufträge scheitern, obwohl `stitch`
+  „Connected" zeigt, oder „Failed to connect"** →
+  Schlüssel falsch kopiert oder in Stitch gelöscht.
+  Neuen Schlüssel erzeugen und mit `clawbook agenten
+  schluessel STITCH_API_KEY` neu setzen.
 - **Fehler „Incompatible auth server: does not support
   dynamic client registration"** → Claude Code hat den
   Schlüssel-Header ignoriert und versucht eine andere
   Anmeldung. Das ist ein bekanntes Problem von Claude
   Code. Eintrag prüfen (`claude mcp get stitch` muss
-  den Header zeigen) und neu anlegen; tritt es
-  weiterhin auf, melde es im Kurs — das Image bekommt
-  dann eine neuere Claude-Code-Version.
+  den Header zeigen) und mit `clawbook agenten sync`
+  neu anlegen lassen; tritt es weiterhin auf, melde es
+  im Kurs — das Image bekommt dann eine neuere
+  Claude-Code-Version.
 - **Stitch antwortet mit Kontingent-Fehler** → Das
   monatliche Kontingent ist verbraucht. Bis zum
   Monatswechsel warten oder bei Google nach bezahlten
@@ -282,8 +329,10 @@ Servers.
 Erst „Typische Fehler" oben. Bei NotebookLM in dieser
 Reihenfolge prüfen: Fenster B zeigt den Bildschirm?
 `echo $DISPLAY` gibt `:0`? Was meldet `clawbook
-notebooklm`? Bei Stitch `claude mcp get stitch`. Im Kurs
-melden mit Befehl und Meldung — ohne Schlüssel und
-ohne Dateien aus `~/.notebooklm/`. Probleme mit dem
+notebooklm`? Bei Stitch `clawbook agenten` und `claude
+mcp get stitch`. Im Kurs melden mit Befehl und Meldung —
+ohne Schlüssel und ohne Dateien aus `~/.notebooklm/`,
+`~/.clawbook/secrets` oder
+`~/.gemini/config/mcp_config.json`. Probleme mit dem
 Google-Konto selbst (gesperrt, Zwei-Faktor verloren)
 kann nur Google lösen.

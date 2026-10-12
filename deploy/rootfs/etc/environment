@@ -7,3 +7,4 @@ PLAYWRIGHT_MCP_BROWSER=chromium
 UV_TOOL_DIR=/opt/uv-tools
 UV_TOOL_BIN_DIR=/usr/local/bin
 DISPLAY=:0
+BASH_ENV=/etc/profile.d/clawbook-secrets.sh

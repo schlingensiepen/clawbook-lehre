@@ -1,6 +1,6 @@
 # Kurs-Dienste: Wiki.js-MCP und Docling
 
-Stand: 2026-10-05
+Stand: 2026-10-12
 
 > Die Anbieter ändern ihre Seiten, Menüs und Angebote
 > laufend. Sieht etwas anders aus als hier beschrieben,
@@ -13,12 +13,13 @@ Adresse und Zugang bekommst du von der Kursleitung —
 auf dieser Seite stehen nur Platzhalter.
 
 - **Wiki.js** ist das Wiki des Kurses. Über den
-  **Wiki.js-MCP** kann Claude Code darin suchen, Seiten
-  lesen und — wenn du es erlaubst — Seiten anlegen und
-  ändern. Ein MCP-Server ist ein kleines Programm, das
-  dem Agenten Werkzeuge anbietet; dieses hier ist im
-  Image installiert (`wikijs-mcp-edit`) und muss nur
-  noch mit Adresse und Schlüssel verbunden werden.
+  **Wiki.js-MCP** können die Agenten darin suchen,
+  Seiten lesen und — wenn Sie es erlauben — Seiten
+  anlegen und ändern. Ein MCP-Server ist ein kleines
+  Programm, das dem Agenten Werkzeuge anbietet; dieses
+  hier ist im Image installiert (`wikijs-mcp-edit`), und
+  clawbook trägt es bei allen Agenten ein, sobald
+  Adresse und Schlüssel gesetzt sind.
 - **Docling** wandelt Dokumente (PDF, Word, Scans) in
   Markdown um. Der WorkspaceManager `wsm` nutzt es bei
   `wsm update`, um die Originale aus `raw/` als Text
@@ -57,17 +58,49 @@ ohne.
 
 ## Im clawbook
 
-### Wiki.js-MCP für Claude Code eintragen
+### Wiki.js-MCP für alle Agenten
 
-Es gibt zwei Varianten — **führe nur eine aus**. Der
-Schlüssel wird vorher unsichtbar abgefragt, damit er
-nicht in der Befehlshistorie landet (Muster in der
-[Übersicht](README.md), Regel 2). Die Werte landen in
-`~/.claude.json` in deinem Home-Verzeichnis, nicht in
-`~/.bashrc`; `-s user` heißt: gilt in allen deinen
-Projekten.
+**Das tun Sie selbst:** Adresse und Schlüssel einmal
+im Container eingeben. clawbook fragt jeweils nach dem
+Wert; die Eingabe bleibt unsichtbar und landet nicht in
+der Befehlshistorie.
 
-**Variante A — nur lesen** (für den Anfang):
+```bash
+clawbook agenten schluessel WIKIJS_URL       # Wert: https://wiki.example.org
+clawbook agenten schluessel WIKIJS_API_KEY   # Wert: Ihr Schlüssel
+```
+
+Die Adresse ohne Pfad angeben, also ohne `/graphql` am
+Ende. Damit bekommen die Agenten nur Werkzeuge zum
+**Lesen** — für den Anfang genau richtig, denn so kann
+kein Agent im Wiki versehentlich etwas ändern. Sollen
+sie auch Seiten anlegen und ändern dürfen, zusätzlich:
+
+```bash
+clawbook agenten schluessel WIKIJS_ENABLE_EDIT   # Wert: true
+```
+
+Zurück zu nur lesen: `clawbook agenten schluessel
+WIKIJS_ENABLE_EDIT --entfernen`. Alles geht auch im
+clawbook-Menü, Punkt 10, dann `k`.
+
+**Das erledigt clawbook:** Sobald `WIKIJS_URL` und
+`WIKIJS_API_KEY` gesetzt sind, trägt es den Server
+`wikijs` bei Claude Code, Codex, Copilot CLI, OpenCode
+und Antigravity ein und meldet je Agent „MCP wikijs
+eingetragen“. Die Werte stehen nur in
+`~/.clawbook/secrets` (nur für Sie lesbar); die Agenten
+bekommen sie in jedem neuen Terminal als
+Umgebungsvariablen. Einzelheiten:
+[Agenten-Ausstattung](../agenten-ausstattung.md).
+Laufende Agenten bitte neu starten.
+
+**Falls die Automatik nicht geht:** den Server von Hand
+nur bei Claude Code eintragen. Der Schlüssel wird
+vorher unsichtbar abgefragt (Muster in der
+[Übersicht](README.md), Regel 2); die Werte landen in
+`~/.claude.json`, `-s user` heißt: gilt in allen Ihren
+Projekten. Nur lesen:
 
 ```bash
 read -rs KEY
@@ -78,24 +111,11 @@ claude mcp add -s user wikijs \
 unset KEY
 ```
 
-**Variante B — lesen und schreiben:** zusätzlich die
-Variable `WIKIJS_ENABLE_EDIT=true`. Ohne sie bietet der
-Server dem Agenten nur Lese-Werkzeuge an, und der
-Agent kann im Wiki nichts versehentlich ändern.
-
-```bash
-read -rs KEY
-claude mcp add -s user wikijs \
-  -e WIKIJS_URL=https://wiki.example.org \
-  -e WIKIJS_API_KEY="$KEY" \
-  -e WIKIJS_ENABLE_EDIT=true \
-  -- wikijs-mcp-edit
-unset KEY
-```
-
-Zum Wechsel von A nach B (oder zurück) zuerst
-`claude mcp remove -s user wikijs`, dann die andere
-Variante eintragen.
+Lesen und schreiben: zusätzlich
+`-e WIKIJS_ENABLE_EDIT=true` vor `--`. Zum Wechsel
+zuerst `claude mcp remove -s user wikijs`. Die Wege für
+die anderen Agenten stehen in der
+[Agenten-Ausstattung](../agenten-ausstattung.md).
 
 ### Docling-Adresse für wsm eintragen
 
@@ -131,14 +151,18 @@ wsm config --validate
 Wiki.js:
 
 ```bash
+clawbook agenten
 claude mcp list
 ```
 
-zeigt `wikijs` mit „Connected". In einer
+Der erste Befehl zeigt in der Zeile `wikijs` bei jedem
+Agenten `ja` (bei `SCHLÜSSEL` fehlt noch ein Wert), der
+zweite `wikijs` mit „Connected". In einer
 Claude-Code-Sitzung `/mcp` eingeben: Der Server listet
 Werkzeuge wie `search_pages` und `get_page` — und nur
-bei Variante B auch `create_page` und `update_page`.
-Dann den Agenten bitten: „Suche im Wiki nach …".
+mit `WIKIJS_ENABLE_EDIT=true` auch `create_page` und
+`update_page`. Dann den Agenten bitten: „Suche im Wiki
+nach …".
 
 Docling:
 
@@ -153,20 +177,26 @@ eine Testdatei (ein kleines PDF, das dir gehört) in
 
 ## Typische Fehler
 
+- **`clawbook agenten` zeigt bei `wikijs`
+  `SCHLÜSSEL`** → `WIKIJS_URL` oder `WIKIJS_API_KEY`
+  fehlt noch (siehe oben).
 - **`claude mcp list` zeigt `wikijs` als „Failed to
-  connect"** → Adresse oder Schlüssel falsch, oder das
-  Wiki ist gerade nicht erreichbar. Adresse im Browser
-  unter Windows öffnen; wenn das Wiki da ist, Eintrag
-  mit `claude mcp get wikijs` prüfen, entfernen und neu
-  anlegen. Die Adresse ohne Pfad angeben, also ohne
+  connect"** → Adresse oder Schlüssel falsch, das Wiki
+  gerade nicht erreichbar, oder das Terminal ist älter
+  als der Schlüssel (neues Terminal öffnen, Agent neu
+  starten). Adresse im Browser unter Windows öffnen;
+  wenn das Wiki da ist, die Werte mit `clawbook agenten
+  schluessel WIKIJS_URL` bzw. `WIKIJS_API_KEY` neu
+  setzen. Die Adresse ohne Pfad angeben, also ohne
   `/graphql` am Ende.
 - **Der Agent kann lesen, aber „create_page" gibt es
-  nicht** → Das ist Absicht bei Variante A. Für
-  Schreibzugriff auf Variante B wechseln.
+  nicht** → Das ist Absicht, solange
+  `WIKIJS_ENABLE_EDIT` nicht auf `true` steht.
 - **Nach einigen Wochen schlagen Wiki-Zugriffe mit
   „401" oder „unauthorized" fehl** → Der Schlüssel ist
   abgelaufen. Neuen Schlüssel bei der Kursleitung
-  holen, Eintrag entfernen und neu anlegen.
+  holen und mit `clawbook agenten schluessel
+  WIKIJS_API_KEY` setzen.
 - **`wsm update` meldet „Keine Docling-Server
   konfiguriert … nur .md-Dateien werden kopiert"** →
   `docling_servers` ist noch leer. Adresse eintragen
@@ -188,8 +218,8 @@ eine Testdatei (ein kleines PDF, das dir gehört) in
 Erst „Typische Fehler" oben, dann prüfen, ob die
 Adresse im Browser unter Windows erreichbar ist — wenn
 nicht, liegt es am Netz (VPN) oder am Server, und die
-Kursleitung weiß Bescheid. Sonst `claude mcp get
-wikijs` und `wsm config --validate`. Im Kurs melden
-mit Befehl und Meldung, ohne den Schlüssel; ein
+Kursleitung weiß Bescheid. Sonst `clawbook agenten`,
+`claude mcp get wikijs` und `wsm config --validate`. Im
+Kurs melden mit Befehl und Meldung, ohne den Schlüssel; ein
 abgelaufener oder verlorener Schlüssel wird dort
 ersetzt.

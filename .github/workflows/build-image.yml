@@ -49,6 +49,7 @@ jobs:
                      deploy/rootfs/usr/local/bin/clawbook-* \
                      deploy/rootfs/usr/local/bin/wsm \
                      deploy/rootfs/etc/profile.d/zz-clawbook-menu.sh \
+                     deploy/rootfs/etc/profile.d/clawbook-secrets.sh \
                      deploy/check-versions.sh \
                      deploy/smoke-test.sh
       - name: Check Python scripts

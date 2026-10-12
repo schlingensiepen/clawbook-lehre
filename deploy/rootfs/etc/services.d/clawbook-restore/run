@@ -1,8 +1,10 @@
 #!/bin/bash
 # One-shot service: installs the packages from ~/.clawbook/stand.json that
-# a new image lacks (noted by /etc/cont-init.d/10-clawbook). Runs beside
-# SSH, so a login does not wait for it; progress in ~/.clawbook/restore.log,
-# state in ~/.clawbook/restore.json and "clawbook status".
+# a new image lacks (noted by /etc/cont-init.d/10-clawbook), then carries
+# the agent equipment into every agent ("clawbook agenten sync", also when
+# nothing was to restore). Runs beside SSH, so a login does not wait for
+# it; progress in ~/.clawbook/restore.log, state in ~/.clawbook/restore.json,
+# ~/.clawbook/agenten-stand.json, "clawbook status" and "clawbook agenten".
 # "s6-svc -O": do not start again when clawbook ends. exec: a stop of the
 # container reaches clawbook (and apt) directly; an interrupted dpkg run is
 # repaired by the next restore ("dpkg --configure -a").

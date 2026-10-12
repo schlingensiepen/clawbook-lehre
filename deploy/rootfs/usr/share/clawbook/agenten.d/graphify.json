@@ -1,0 +1,12 @@
+{
+  "art": "skill",
+  "name": "graphify",
+  "beschreibung": "Skill für graphify (Wissensgraph aus Code und Dokumenten), je Agent die passende Fassung",
+  "quelle": {
+    "befehl_je_ziel": {
+      "claude": ["graphify", "install", "--platform", "claude"],
+      "agents": ["graphify", "install", "--platform", "agents"],
+      "antigravity": ["graphify", "install", "--platform", "antigravity"]
+    }
+  }
+}

@@ -9,12 +9,12 @@ Stand: 2026-10-12
 
 Diese Werkzeuge brauchen keinen Zugang bei einem
 Anbieter. Sie sind im Image installiert und
-funktionieren sofort. Zwei davon — Playwright und
-Graphify — melden Sie einmal bei Claude Code an,
-damit der Agent sie benutzen kann (den Skill für
-`playwright-cli` richtet der Container schon selbst
-ein); das dauert eine Minute und steht hier Schritt
-für Schritt.
+funktionieren sofort. Damit die Agenten Playwright und
+Graphify auch benutzen können, trägt clawbook sie bei
+allen Agenten ein (Claude Code, Codex, Copilot CLI,
+OpenCode, Antigravity) — Sie müssen dafür nichts tun.
+Wie das geht und wie Sie es prüfen, steht in der
+[Agenten-Ausstattung](../agenten-ausstattung.md).
 
 **Kosten:** keine. (Graphify nutzt für Dokumente das
 Modell Ihres Agenten, also dessen Kontingent.)
@@ -38,17 +38,18 @@ das der Agent wie jeden anderen Befehl aufruft. Es
 belastet den Kontext des Agenten (seinen
 „Arbeitsspeicher" an Text) deutlich weniger als der
 MCP-Server, weil keine großen Werkzeugbeschreibungen
-geladen werden. Claude Code erfährt davon über einen
-**Skill** — eine kurze Anleitung. Den richtet der
-Container beim ersten Start einmal in Ihrem
-Home-Verzeichnis ein (`~/.claude/skills/playwright-cli`,
-dazu `~/.playwright/cli.config.json` mit Chromium als
-Browser); Claude Code findet ihn damit in jedem
-Projekt. Sie müssen nichts tun.
+geladen werden. Die Agenten erfahren davon über einen
+**Skill** — eine kurze Anleitung.
 
-Von Hand brauchen Sie den Befehl nur, wenn Sie den
-Skill gelöscht haben (im Home) oder ihn in einem
-einzelnen Projekt haben wollen (im Projektordner):
+**Das erledigt clawbook:** Es richtet den Skill
+`playwright-cli` bei allen Agenten in Ihrem
+Home-Verzeichnis ein (`~/.claude/skills`,
+`~/.agents/skills`, `~/.gemini/config/skills`); die
+Agenten finden ihn damit in jedem Projekt.
+
+**Falls die Automatik nicht geht** oder Sie den Skill in
+einem einzelnen Projekt haben wollen (im
+Projektordner):
 
 ```bash
 cd ~                       # oder: cd ~/source/<Bereich>/<Projekt>
@@ -67,8 +68,15 @@ playwright-cli close
 
 **Playwright-MCP** — der MCP-Server, wenn der Agent
 länger auf einer Seite arbeiten soll und den Zustand
-zwischen Schritten halten muss. Für Claude Code
-eintragen:
+zwischen Schritten halten muss.
+
+**Das erledigt clawbook:** Es trägt den Server
+`playwright` bei allen Agenten ein, als
+`playwright-mcp --headless`.
+
+**Falls die Automatik nicht geht**, für Claude Code von
+Hand (die anderen Agenten: siehe
+[Agenten-Ausstattung](../agenten-ausstattung.md)):
 
 ```bash
 claude mcp add -s user playwright -- playwright-mcp --headless
@@ -93,22 +101,25 @@ Graphify liest ein Projekt (Code, Markdown, PDF) und
 baut daraus einen Graphen aus Begriffen und ihren
 Beziehungen, den der Agent dann befragen kann. Code
 wird lokal zerlegt, ohne Modell; für Dokumente nutzt
-Graphify das Modell des Agenten, in dem es läuft. Für
-Claude Code eintragen:
+Graphify das Modell des Agenten, in dem es läuft.
+
+**Das erledigt clawbook:** Es richtet den Skill
+`graphify` bei allen Agenten ein, für jeden in der
+passenden Fassung. In Claude Code gibt es damit den
+Befehl `/graphify .`, der den Graphen des aktuellen
+Projektordners nach `graphify-out/` schreibt; die
+anderen Agenten bitten Sie einfach darum („Baue mit
+graphify einen Graphen dieses Projekts“).
+
+**Falls die Automatik nicht geht:** von Hand, in einem
+leeren Ordner (manche Fassungen legen zusätzlich
+Dateien im aktuellen Ordner an; `--platform claude`
+hängt außerdem einen Abschnitt an `~/.claude/CLAUDE.md`
+an):
 
 ```bash
-graphify install --platform claude
-```
-
-Danach gibt es in Claude Code den Befehl
-`/graphify .`, der den Graphen des aktuellen
-Projektordners nach `graphify-out/` schreibt. Für
-andere Agenten:
-
-```bash
-graphify install --platform codex
-graphify install --platform opencode
-graphify install --platform antigravity
+cd "$(mktemp -d)"
+graphify install --platform claude    # bzw. agents, antigravity
 ```
 
 Auch ohne Agent, im Projektordner:
@@ -252,6 +263,7 @@ zeigt jede Zeile mit Version — `playwright-cli`,
 müssen dabei sein. Außerdem:
 
 ```bash
+clawbook agenten       # playwright, playwright-cli, graphify: überall „ja“
 claude mcp list        # playwright: Connected
 wsm config --validate  # Konfiguration gültig
 ```
@@ -265,9 +277,9 @@ In Claude Code zeigt `/mcp` den Playwright-Server und
 - **`claude mcp list` zeigt `playwright` als „Failed
   to connect"** → Eintrag prüfen mit
   `claude mcp get playwright`: der Befehl muss
-  `playwright-mcp` mit `--headless` sein. Entfernen
-  (`claude mcp remove -s user playwright`) und neu
-  anlegen.
+  `playwright-mcp` mit `--headless` sein. Sonst
+  `clawbook agenten sync` aufrufen; das trägt den
+  Server neu ein.
 - **Der Browser startet nicht („Executable doesn't
   exist", „is not installed" oder „Chromium
   distribution 'chrome' is not found")** → Chromium für
@@ -280,10 +292,11 @@ In Claude Code zeigt `/mcp` den Playwright-Server und
   für `/opt/ms-playwright`, ist das Image älter als die
   Korrektur dieses Fehlers: Image aktualisieren
   ([Pflege](../pflege.md), Abschnitt 3).
-- **`/graphify` fehlt in Claude Code** →
-  `graphify install --platform claude` noch nicht
-  ausgeführt, oder Claude Code lief dabei noch. Claude
-  Code beenden (`/exit`) und neu starten.
+- **`/graphify` fehlt in Claude Code** → Claude Code
+  lief schon, als clawbook den Skill eingerichtet hat.
+  Claude Code beenden (`/exit`) und neu starten. Zeigt
+  `clawbook agenten` bei `graphify` kein „ja“:
+  `clawbook agenten sync`.
 - **`graphify .` bricht bei PDFs ab oder fragt nach
   einem Schlüssel** → Für Dokumente braucht Graphify
   ein Modell. Nutzen Sie `/graphify .` innerhalb von
@@ -306,7 +319,8 @@ In Claude Code zeigt `/mcp` den Playwright-Server und
 
 Erst „Typische Fehler" oben, dann `clawbook check`:
 Steht dort `FEHLT`, liegt es am Image — melden. Sonst
-`claude mcp list`, `claude mcp get playwright` und
+`clawbook agenten`, `claude mcp list`,
+`claude mcp get playwright` und
 `wsm config --validate`. Bei `wsm` hilft oft schon ein
 Blick in `~/.workspacemanager.yml` (GitHub-Name,
 Einrückung). Im Kurs melden mit Befehl und

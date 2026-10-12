@@ -26,12 +26,17 @@ Datei auf einen anderen Rechner mitnehmen lässt.
    Anbietern anlegen und jedes Werkzeug im Container
    anmelden. Die Zugänge gehören Ihnen und stecken nicht
    im Image.
-3. **[Kurse und Technikpakete](kurse-und-pakete.md)** —
+3. **[Agenten-Ausstattung](agenten-ausstattung.md)** —
+   was clawbook bei allen Agenten einträgt
+   (MCP-Server, Skills, Hinweise zu den Werkzeugen),
+   wie Sie Schlüssel für Stitch und Wiki.js setzen und
+   wie Sie prüfen, was eingetragen ist.
+4. **[Kurse und Technikpakete](kurse-und-pakete.md)** —
    wenn Ihre Lehrveranstaltung weitere Werkzeuge
    braucht (Java, .NET, Datenbanken, ESP32 …): Kurs
    hinzufügen und je Kurs ein eigenes VS Code
    einrichten.
-4. **[Pflege](pflege.md)** — täglich starten,
+5. **[Pflege](pflege.md)** — täglich starten,
    aktualisieren, sichern und auf einen anderen Rechner
    umziehen.
 

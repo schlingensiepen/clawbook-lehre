@@ -1,0 +1,13 @@
+{
+  "art": "mcp",
+  "name": "wikijs",
+  "beschreibung": "Wiki.js des Kurses (Adresse und Schlüssel vom Kurs; Schreiben nur mit WIKIJS_ENABLE_EDIT=true)",
+  "transport": "stdio",
+  "command": "wikijs-mcp-edit",
+  "env": {
+    "WIKIJS_URL": "${WIKIJS_URL}",
+    "WIKIJS_API_KEY": "${WIKIJS_API_KEY}",
+    "WIKIJS_ENABLE_EDIT": "${WIKIJS_ENABLE_EDIT}"
+  },
+  "benoetigt": ["WIKIJS_URL", "WIKIJS_API_KEY"]
+}

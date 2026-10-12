@@ -1,0 +1,6 @@
+{
+  "art": "skill",
+  "name": "notebooklm",
+  "beschreibung": "Skill für NotebookLM (notebooklm-py)",
+  "quelle": {"befehl": ["notebooklm", "skill", "install"]}
+}

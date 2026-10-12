@@ -1,0 +1,9 @@
+{
+  "art": "mcp",
+  "name": "playwright",
+  "beschreibung": "Playwright-MCP: Browser (Chromium, ohne Fenster) für den Agenten",
+  "transport": "stdio",
+  "command": "playwright-mcp",
+  "args": ["--headless"],
+  "env": {"PLAYWRIGHT_MCP_BROWSER": "chromium"}
+}

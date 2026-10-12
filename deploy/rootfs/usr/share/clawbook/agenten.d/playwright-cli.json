@@ -1,0 +1,6 @@
+{
+  "art": "skill",
+  "name": "playwright-cli",
+  "beschreibung": "Skill für playwright-cli (Browser per Kommandozeile)",
+  "quelle": {"befehl": ["playwright-cli", "install", "--skills"]}
+}

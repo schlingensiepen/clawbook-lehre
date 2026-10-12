@@ -26,7 +26,14 @@ the exit code tells success (0) or failure (non-zero).
     clawbook pakete add|remove <name...> [--yes] [--vorladen]
     clawbook pakete vorladen        PlatformIO platform for ESP32 (pioarduino)
     clawbook wiederherstellen       install packages from stand.json again
-                                    (--pruefen: cont-init, --dienst: service)
+                                    (--pruefen: cont-init, --dienst: service,
+                                    which then also runs "agenten sync")
+    clawbook agenten [status]       agent equipment: MCP servers, skills and
+                                    instructions per installed agent
+    clawbook agenten sync           carry them into every installed agent
+    clawbook agenten schluessel <NAME> [--entfernen]
+                                    store a key in ~/.clawbook/secrets (asks
+                                    hidden; stdin without a terminal), sync
 
 Interactive start: when gh is not logged in, the menu begins with the
 GitHub login (the student may cancel; then she is asked again next time).
@@ -44,7 +51,10 @@ exec run as root): files in the home directory always belong to "student".
 
 import concurrent.futures
 import datetime
+import fcntl
+import getpass
 import glob
+import hashlib
 import json
 import os
 import pwd
@@ -55,6 +65,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 
 # Version of the command line interface the Windows script talks to.
 # Raise it when JSON fields change incompatibly or commands disappear.
@@ -180,6 +191,15 @@ Aufruf:
                                    Pakete aus ~/.clawbook/stand.json erneut
                                    einspielen (läuft nach einem neuen Image
                                    von selbst im Hintergrund)
+  clawbook agenten [status] [--json]
+                                   Agenten-Ausstattung: welche MCP-Server,
+                                   Skills und Anweisungen bei welchem Agenten
+                                   eingetragen sind
+  clawbook agenten sync [--json]   alles bei allen installierten Agenten
+                                   eintragen (läuft auch von selbst)
+  clawbook agenten schluessel <NAME> [--entfernen] [--json]
+                                   Schlüssel (z. B. STITCH_API_KEY) unsichtbar
+                                   abfragen, speichern und abgleichen
   clawbook --version | --help
 
 Mit --json gibt clawbook nur JSON aus (für das Windows-Skript).
@@ -215,7 +235,8 @@ def key_path():
     return os.path.join(user_home(), ".ssh", "id_ed25519")
 
 
-def capture(cmd, timeout, stdin=subprocess.DEVNULL, env=None, stderr=subprocess.STDOUT):
+def capture(cmd, timeout, stdin=subprocess.DEVNULL, env=None, stderr=subprocess.STDOUT,
+            cwd=None):
     """Runs cmd in a session of its own and returns (exit code, stdout).
 
     The time limit covers the whole process group: on timeout (or Ctrl+C)
@@ -223,7 +244,7 @@ def capture(cmd, timeout, stdin=subprocess.DEVNULL, env=None, stderr=subprocess.
     a browser started by a tool) cannot keep clawbook waiting."""
     try:
         p = subprocess.Popen(cmd, stdin=stdin, stdout=subprocess.PIPE, stderr=stderr,
-                             env=env, start_new_session=True)
+                             env=env, start_new_session=True, cwd=cwd)
     except OSError as e:
         return 127, str(e)
 
@@ -289,17 +310,20 @@ def chown_to_user(path):
         os.chown(path, u.pw_uid, u.pw_gid)
 
 
-def write_user_file(path, text, mode=0o644):
+def write_user_file(path, text, mode=0o644, tmp_dir=None):
     """Writes a file in the user's home atomically, owned by the user.
 
     Falls back to sudo when the directory is not writable for the caller
-    (e.g. ~/.clawbook created by root in the start script)."""
+    (e.g. ~/.clawbook created by root in the start script); the temporary
+    file for that goes to tmp_dir (default: the system's temp directory)."""
     directory = os.path.dirname(path)
     if not os.path.isdir(directory):
-        if os.access(os.path.dirname(directory), os.W_OK):
+        # As the caller first (also missing parents, e.g. ~/.config): sudo
+        # would leave parents owned by root.
+        try:
             os.makedirs(directory, exist_ok=True)
             chown_to_user(directory)
-        else:
+        except PermissionError:
             rc, out = run(["sudo", "-n", "install", "-d", "-o", USER_NAME,
                            "-g", USER_NAME, directory])
             if rc != 0:
@@ -317,7 +341,7 @@ def write_user_file(path, text, mode=0o644):
                 os.unlink(tmp)
             raise
         return
-    fd, tmp = tempfile.mkstemp(prefix="clawbook-")
+    fd, tmp = tempfile.mkstemp(prefix="clawbook-", dir=tmp_dir)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
@@ -1056,6 +1080,7 @@ def cmd_pakete_add(opts, names):
     result = {"aktion": "add", "pakete": names,
               "installiert": sorted(n for n in names if n in installed),
               "stand": stand_path(), "vorladen": preload_after_add(opts, installed)}
+    result["agenten"] = sync_after_change(opts)
     if opts["json"]:
         sys.stdout.write(dump_json(result))
     else:
@@ -1098,6 +1123,8 @@ def cmd_pakete_remove(opts, names):
     result = {"aktion": "remove", "pakete": names,
               "entfernt": sorted(n for n in todo if n not in after),
               "nicht_installiert": missing, "stand": stand_path()}
+    if todo:
+        result["agenten"] = sync_after_change(opts)
     if opts["json"]:
         sys.stdout.write(dump_json(result))
     else:
@@ -1525,15 +1552,19 @@ def cmd_wiederherstellen(opts):
                   f"{restore_log_path()}).")
         return 0
     if opts["dienst"]:
+        # Start of the container (service clawbook-restore): packages first,
+        # then the agent equipment (packages may bring entries of their own).
         state = restore_state()
         names = union([n for n in state.get("pakete") or []
                        if isinstance(n, str) and PACKAGE_RE.match(n)])
-        if state["zustand"] != "laeuft" or not names:
-            return 0
-        state = restore_run(names)
-        print(f"Wiederherstellung: {state['zustand']}"
-              + (f" - {state['meldung']}" if state.get("meldung") else ""))
-        return 0 if state["zustand"] == "fertig" else 1
+        rc = 0
+        if state["zustand"] == "laeuft" and names:
+            state = restore_run(names)
+            print(f"Wiederherstellung: {state['zustand']}"
+                  + (f" - {state['meldung']}" if state.get("meldung") else ""))
+            rc = 0 if state["zustand"] == "fertig" else 1
+        print(sync_summary(agenten_sync_quiet()), flush=True)
+        return rc
     state = restore_state()
     if restore_running(state):
         raise CliError("Die Wiederherstellung läuft schon im Hintergrund "
@@ -1541,6 +1572,7 @@ def cmd_wiederherstellen(opts):
     state = restore_check()
     if state["zustand"] == "laeuft":
         state = restore_run(state["pakete"], echo=not opts["json"])
+        say(opts, sync_summary(agenten_sync_quiet()))
     if opts["json"]:
         sys.stdout.write(dump_json(restore_summary()))
     elif state["zustand"] == "keine":
@@ -2198,6 +2230,1655 @@ def cmd_notebooklm(opts):
     return 1
 
 
+# --- agenten ---------------------------------------------------------------
+# Agent equipment: MCP servers, skills and instructions that the image and
+# the technology packages bring along are carried into every installed
+# coding agent ("clawbook agenten sync"), on the user level only.
+#
+# Definitions: *.json in /usr/share/clawbook/agenten.d (image, packages) and
+# ~/.clawbook/agenten.d (own entries; the same name wins over the image).
+# A file holds one entry or a list of entries:
+#   {"art": "mcp", "name": "x", "transport": "stdio", "command": "...",
+#    "args": [...], "env": {"K": "${K}"}, "benoetigt": ["K"]}
+#   {"art": "mcp", "name": "x", "transport": "http", "url": "https://...",
+#    "headers": {"H": "${K}"}, "benoetigt": ["K"]}
+#   {"art": "skill", "name": "x", "quelle": {"befehl": [...]}}
+#        quelle: befehl | befehl_je_ziel {ziel: [...]} | verzeichnis |
+#                verzeichnis_je_ziel {ziel: dir}; ziel = claude | agents |
+#                antigravity (the shared skill folders)
+#   {"art": "anweisung", "name": "x", "datei": "/abs/path.md" | "text": "...",
+#    "reihenfolge": 50}
+#   {"name": "x", "aus": true}            switches an entry off
+# Optional for all: "agenten": ["claude", "codex", ...] (default: all),
+# "beschreibung". Values only refer to keys as ${NAME}; the keys live in
+# ~/.clawbook/secrets (KEY=VALUE, 0600), which /etc/profile.d/
+# clawbook-secrets.sh exports into every shell (login shells, interactive
+# shells via /etc/bash.bashrc, other bash via BASH_ENV). An entry whose
+# "benoetigt" key is missing is left out and reported; an env/header value
+# whose key is missing is left out alone.
+#
+# Translation per agent (verified against the agents in the image):
+#   Claude Code  "claude mcp remove/add-json -s user" (${NAME} resolved by
+#                Claude at run time), skills in ~/.claude/skills, block in
+#                ~/.claude/CLAUDE.md
+#   Codex        merge of ~/.codex/config.toml by table name (its CLI drops
+#                comments and cannot set headers): env_vars,
+#                env_http_headers; skills in ~/.agents/skills, block in
+#                ~/.codex/AGENTS.md
+#   Copilot CLI  "copilot mcp remove/add" (${NAME}), skills in
+#                ~/.agents/skills, block in ~/.copilot/copilot-instructions.md
+#   OpenCode     JSONC merge of ~/.config/opencode/opencode.json[c] by key
+#                ({env:NAME}; comments stay), skills in ~/.agents/skills
+#                (it also reads ~/.claude/skills and drops the duplicate),
+#                block in ~/.config/opencode/AGENTS.md
+#   Antigravity  "agy mcp add/remove"; agy resolves no variables: stdio
+#                servers inherit the environment, header keys are written
+#                in plain text (file 0600); skills in ~/.gemini/config/
+#                skills, rules file ~/.gemini/config/rules/clawbook.md
+# Vendor skill commands run with a throwaway HOME and working directory
+# (they also write other files there); the result is cached per image
+# build in ~/.clawbook/agenten/quellen. Names written by sync are noted in
+# ~/.clawbook/agenten-stand.json; only those are changed or removed.
+
+AGENTEN_SYSTEM_DIR = "/usr/share/clawbook/agenten.d"
+AGENTEN_USER_DIR = "agenten.d"           # in ~/.clawbook
+AGENTEN_WORK_DIR = "agenten"             # in ~/.clawbook: lock, cache, backups
+AGENTEN_STAND = "agenten-stand.json"
+AGENTEN_STAND_FORMAT = 1
+SECRETS_FILE = "secrets"
+SECRETS_PROFILE = "/etc/profile.d/clawbook-secrets.sh"
+ENTRY_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+# Variables that switch an agent's login or billing: exported into every
+# shell they would act everywhere, so clawbook does not store them.
+SECRET_REFUSED = {
+    "ANTHROPIC_API_KEY": "Claude Code nähme dann diesen Schlüssel statt Ihres Abos",
+    "ANTHROPIC_AUTH_TOKEN": "Claude Code nähme dann dieses Token statt Ihrer Anmeldung",
+    "OPENAI_API_KEY": "Codex und andere Werkzeuge nähmen dann diesen Schlüssel",
+    "CODEX_API_KEY": "Codex nähme dann diesen Schlüssel statt Ihrer Anmeldung",
+    "GH_TOKEN": "gh und git nähmen dann dieses Token statt Ihrer Anmeldung",
+    "GITHUB_TOKEN": "gh und Copilot nähmen dann dieses Token statt Ihrer Anmeldung",
+    "COPILOT_GITHUB_TOKEN": "Copilot nähme dann dieses Token statt Ihrer Anmeldung",
+    "GEMINI_API_KEY": "Google-Werkzeuge nähmen dann diesen Schlüssel",
+    "GOOGLE_API_KEY": "Google-Werkzeuge nähmen dann diesen Schlüssel",
+}
+BLOCK_START = "<!-- >>> clawbook agenten sync >>> -->"
+BLOCK_END = "<!-- <<< clawbook agenten sync <<< -->"
+BLOCK_NOTE = ("<!-- Automatisch gepflegt von „clawbook agenten sync“: Änderungen zwischen "
+              "den beiden Markierungen gehen beim nächsten Abgleich verloren. Eigene "
+              "Anweisungen gehören außerhalb. -->")
+
+# (id, display name, command, shared skill folder)
+AGENTS = [("claude", "Claude Code", "claude", "claude"),
+          ("codex", "Codex", "codex", "agents"),
+          ("copilot", "Copilot CLI", "copilot", "agents"),
+          ("opencode", "OpenCode", "opencode", "agents"),
+          ("agy", "Antigravity", "agy", "antigravity")]
+AGENT_IDS = [a[0] for a in AGENTS]
+AGENT_NAMES = {a[0]: a[1] for a in AGENTS}
+AGENT_CMD = {a[0]: a[2] for a in AGENTS}
+AGENT_ZIEL = {a[0]: a[3] for a in AGENTS}
+AGENT_ALIASES = {"antigravity": "agy", "claude-code": "claude"}
+SKILL_TARGETS = {"claude": ".claude/skills", "agents": ".agents/skills",
+                 "antigravity": ".gemini/config/skills"}
+# Where vendor commands put a skill below their HOME or working directory.
+SKILL_FOUND = {"claude": (".claude/skills",),
+               "agents": (".agents/skills", ".codex/skills"),
+               "antigravity": (".gemini/config/skills", ".gemini/antigravity-cli/skills")}
+INSTRUCTION_FILES = {"claude": ".claude/CLAUDE.md", "codex": ".codex/AGENTS.md",
+                     "copilot": ".copilot/copilot-instructions.md",
+                     "opencode": ".config/opencode/AGENTS.md",
+                     "agy": ".gemini/config/rules/clawbook.md"}
+MCP_FILES = {"claude": ".claude.json", "codex": ".codex/config.toml",
+             "copilot": ".copilot/mcp-config.json", "agy": ".gemini/config/mcp_config.json"}
+AGY_RULE_HEAD = ("---\ntrigger: always_on\ndescription: Werkzeuge im clawbook-Container "
+                 "(clawbook agenten sync)\n---\n\n")
+AGY_RULE_NOTE = ("<!-- Automatisch gepflegt von „clawbook agenten sync“: Änderungen an dieser "
+                 "Datei gehen beim nächsten Abgleich verloren. Eigene Regeln gehören in eine "
+                 "andere Datei. -->")
+
+
+def home_path(rel):
+    return os.path.join(user_home(), rel)
+
+
+def agenten_work_dir():
+    """~/.clawbook/agenten, owned by the working user (created if missing)."""
+    path = os.path.join(state_dir(), AGENTEN_WORK_DIR)
+    if not os.path.isdir(path):
+        try:
+            os.makedirs(path, exist_ok=True)
+            chown_to_user(path)
+        except PermissionError:
+            rc, out = run(["sudo", "-n", "install", "-d", "-o", USER_NAME, "-g", USER_NAME,
+                           path])
+            if rc != 0:
+                raise CliError(f"Kann {path} nicht anlegen: {out.strip()}")
+    return path
+
+
+def agent_env():
+    """Environment for the agents' own commands: the working user's home."""
+    return dict(os.environ, HOME=user_home())
+
+
+def run_agent(cmd, timeout=120):
+    return capture(cmd, timeout, env=agent_env())
+
+
+def last_line(out):
+    lines = [ln.strip() for ln in out.strip().splitlines() if ln.strip()]
+    return lines[-1] if lines else "keine Ausgabe"
+
+
+# --- agenten: keys -----------------------------------------------------------
+
+SECRETS_HEAD = ("# clawbook: Schlüssel für die Agenten-Ausstattung "
+                "(clawbook agenten schluessel <NAME>).\n"
+                "# Nur für Sie lesbar. Nicht weitergeben, nie in ein Repository.\n")
+
+
+def secrets_path():
+    return os.path.join(state_dir(), SECRETS_FILE)
+
+
+def read_secrets():
+    """Keys from ~/.clawbook/secrets (KEY=VALUE per line); empty values do
+    not count."""
+    try:
+        with open(secrets_path(), encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return {}
+    except OSError as e:
+        raise CliError(f"Kann {secrets_path()} nicht lesen: {e}")
+    values = {}
+    for line in text.splitlines():
+        if not line or line.lstrip().startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if ENV_NAME_RE.match(key) and value:
+            values[key] = value
+    return values
+
+
+def write_secrets(values):
+    text = SECRETS_HEAD + "".join(f"{k}={v}\n" for k, v in sorted(values.items()))
+    write_user_file(secrets_path(), text, mode=0o600, tmp_dir=agenten_work_dir())
+
+
+# --- agenten: definitions ----------------------------------------------------
+
+def str_list(value, what):
+    if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
+        raise ValueError(f"„{what}“ muss eine Liste von Texten sein")
+    return value
+
+
+def str_dict(value, what):
+    if not isinstance(value, dict) or not all(isinstance(k, str) and isinstance(v, str)
+                                              for k, v in value.items()):
+        raise ValueError(f"„{what}“ muss ein Objekt mit Texten sein")
+    return dict(value)
+
+
+def check_entry(item):
+    """Validates one definition; returns the normalized entry."""
+    if not isinstance(item, dict):
+        raise ValueError("Eintrag ist kein JSON-Objekt")
+    name = item.get("name")
+    if not isinstance(name, str) or not ENTRY_NAME_RE.match(name):
+        raise ValueError(f"ungültiger Name {name!r} (Kleinbuchstaben, Ziffern, . _ -)")
+    agents = [AGENT_ALIASES.get(a, a) for a in str_list(item.get("agenten", ["*"]), "agenten")]
+    unknown = [a for a in agents if a != "*" and a not in AGENT_NAMES]
+    if unknown:
+        raise ValueError(f"{name}: unbekannte Agenten {', '.join(unknown)} "
+                         f"(bekannt: {', '.join(AGENT_IDS)})")
+    entry = {"name": name, "art": item.get("art"), "aus": item.get("aus") is True,
+             "beschreibung": str(item.get("beschreibung") or ""),
+             "agenten": list(AGENT_IDS) if "*" in agents else agents}
+    if entry["aus"]:
+        return entry
+    entry["benoetigt"] = str_list(item.get("benoetigt", []), "benoetigt")
+    bad = [v for v in entry["benoetigt"] if not ENV_NAME_RE.match(v)]
+    if bad:
+        raise ValueError(f"{name}: ungültige Namen in „benoetigt“: {', '.join(bad)}")
+    art = entry["art"]
+    if art == "mcp":
+        transport = item.get("transport", "stdio")
+        entry["transport"] = transport
+        if transport == "stdio":
+            if not isinstance(item.get("command"), str) or not item["command"]:
+                raise ValueError(f"{name}: „command“ fehlt")
+            entry["command"] = item["command"]
+            entry["args"] = str_list(item.get("args", []), "args")
+            entry["env"] = str_dict(item.get("env", {}), "env")
+        elif transport == "http":
+            url = item.get("url")
+            if not isinstance(url, str) or not re.match(r"^https?://", url):
+                raise ValueError(f"{name}: „url“ fehlt oder beginnt nicht mit http(s)://")
+            entry["url"] = url
+            entry["headers"] = str_dict(item.get("headers", {}), "headers")
+        else:
+            raise ValueError(f"{name}: „transport“ muss stdio oder http sein")
+    elif art == "skill":
+        quelle = item.get("quelle")
+        kinds = [k for k in ("befehl", "befehl_je_ziel", "verzeichnis", "verzeichnis_je_ziel")
+                 if isinstance(quelle, dict) and k in quelle]
+        if len(kinds) != 1:
+            raise ValueError(f"{name}: „quelle“ braucht genau eines von befehl, "
+                             "befehl_je_ziel, verzeichnis, verzeichnis_je_ziel")
+        kind = kinds[0]
+        if kind == "befehl":
+            if not str_list(quelle["befehl"], "befehl"):
+                raise ValueError(f"{name}: „befehl“ ist leer")
+        elif kind == "verzeichnis":
+            if not isinstance(quelle["verzeichnis"], str) or not os.path.isabs(quelle["verzeichnis"]):
+                raise ValueError(f"{name}: „verzeichnis“ muss ein absoluter Pfad sein")
+        else:
+            per = quelle[kind]
+            if not isinstance(per, dict) or not per or any(z not in SKILL_TARGETS for z in per):
+                raise ValueError(f"{name}: „{kind}“ braucht Ziele aus "
+                                 f"{', '.join(SKILL_TARGETS)}")
+            for z, v in per.items():
+                if kind == "befehl_je_ziel" and not str_list(v, f"{kind}.{z}"):
+                    raise ValueError(f"{name}: „{kind}.{z}“ ist leer")
+                if kind == "verzeichnis_je_ziel" and not (isinstance(v, str) and os.path.isabs(v)):
+                    raise ValueError(f"{name}: „{kind}.{z}“ muss ein absoluter Pfad sein")
+        entry["quelle"] = {kind: quelle[kind]}
+    elif art == "anweisung":
+        if isinstance(item.get("text"), str):
+            entry["text"] = item["text"]
+        elif isinstance(item.get("datei"), str) and os.path.isabs(item["datei"]):
+            entry["datei"] = item["datei"]
+        else:
+            raise ValueError(f"{name}: „text“ oder „datei“ (absoluter Pfad) fehlt")
+        order = item.get("reihenfolge", 50)
+        if not isinstance(order, int) or isinstance(order, bool):
+            raise ValueError(f"{name}: „reihenfolge“ muss eine Zahl sein")
+        entry["reihenfolge"] = order
+    else:
+        raise ValueError(f"{name}: „art“ muss mcp, skill oder anweisung sein")
+    return entry
+
+
+def load_entries():
+    """All definitions by name (own ones replace the image's) and warnings."""
+    entries, warnings = {}, []
+    for herkunft, directory in (("image", AGENTEN_SYSTEM_DIR),
+                                ("eigene", os.path.join(state_dir(), AGENTEN_USER_DIR))):
+        try:
+            names = sorted(n for n in os.listdir(directory) if n.endswith(".json"))
+        except OSError:
+            continue
+        for fname in names:
+            path = os.path.join(directory, fname)
+            try:
+                data = read_json(path)
+            except (OSError, ValueError) as e:
+                warnings.append(f"{path}: kein gültiges JSON ({e})")
+                continue
+            for item in data if isinstance(data, list) else [data]:
+                try:
+                    entry = check_entry(item)
+                except ValueError as e:
+                    warnings.append(f"{path}: {e}")
+                    continue
+                entry.update(herkunft=herkunft, definition=path)
+                entries.pop(entry["name"], None)
+                entries[entry["name"]] = entry
+    return entries, warnings
+
+
+def entry_missing(entry, secrets):
+    return [v for v in entry.get("benoetigt", []) if not secrets.get(v)]
+
+
+def var_refs(value):
+    return VAR_RE.findall(value)
+
+
+def exact_ref(value):
+    m = VAR_RE.fullmatch(value)
+    return m.group(1) if m else None
+
+
+def subst(value, secrets):
+    return VAR_RE.sub(lambda m: secrets.get(m.group(1), ""), value)
+
+
+def drop_unset(mapping, secrets):
+    """Values referring to a key that is not set are left out."""
+    return {k: v for k, v in mapping.items() if all(secrets.get(n) for n in var_refs(v))}
+
+
+# --- agenten: MCP per agent ------------------------------------------------
+# Builders return (configuration as the agent stores it, plain text key).
+
+def mcp_claude(e, secrets):
+    if e["transport"] == "stdio":
+        conf = {"type": "stdio", "command": e["command"], "args": e["args"]}
+        env = drop_unset(e["env"], secrets)
+        if env:
+            conf["env"] = env
+    else:
+        conf = {"type": "http", "url": e["url"]}
+        headers = drop_unset(e["headers"], secrets)
+        if headers:
+            conf["headers"] = headers
+    return conf, False
+
+
+def mcp_codex(e, secrets):
+    plain = False
+    if e["transport"] == "stdio":
+        conf = {"command": e["command"]}
+        if e["args"]:
+            conf["args"] = e["args"]
+        env, env_vars = {}, []
+        for k, v in drop_unset(e["env"], secrets).items():
+            if exact_ref(v) == k:
+                env_vars.append(k)
+            elif var_refs(v):
+                env[k], plain = subst(v, secrets), True
+            else:
+                env[k] = v
+        if env:
+            conf["env"] = env
+        if env_vars:
+            conf["env_vars"] = env_vars
+        return conf, plain
+    conf = {"url": e["url"]}
+    headers, env_headers = {}, {}
+    for k, v in drop_unset(e["headers"], secrets).items():
+        bearer = re.fullmatch(r"Bearer \$\{([A-Za-z_][A-Za-z0-9_]*)\}", v)
+        if exact_ref(v):
+            env_headers[k] = exact_ref(v)
+        elif k.lower() == "authorization" and bearer:
+            conf["bearer_token_env_var"] = bearer.group(1)
+        elif var_refs(v):
+            headers[k], plain = subst(v, secrets), True
+        else:
+            headers[k] = v
+    if headers:
+        conf["http_headers"] = headers
+    if env_headers:
+        conf["env_http_headers"] = env_headers
+    return conf, plain
+
+
+def mcp_copilot(e, secrets):
+    # Copilot passes only PATH to stdio servers; everything else goes into
+    # "env" and Copilot resolves ${NAME} itself.
+    if e["transport"] == "stdio":
+        return {"type": "local", "command": e["command"], "args": e["args"],
+                "env": drop_unset(e["env"], secrets)}, False
+    return {"type": "http", "url": e["url"], "headers": drop_unset(e["headers"], secrets)}, False
+
+
+def oc_ref(value):
+    return VAR_RE.sub(lambda m: "{env:" + m.group(1) + "}", value)
+
+
+def mcp_opencode(e, secrets):
+    if e["transport"] == "stdio":
+        conf = {"type": "local", "command": [e["command"]] + e["args"], "enabled": True}
+        env = {k: oc_ref(v) for k, v in drop_unset(e["env"], secrets).items()}
+        if env:
+            conf["environment"] = env
+    else:
+        conf = {"type": "remote", "url": e["url"], "enabled": True}
+        headers = {k: oc_ref(v) for k, v in drop_unset(e["headers"], secrets).items()}
+        if headers:
+            # A key in the header: no OAuth attempt.
+            conf.update(headers=headers, oauth=False)
+    return conf, False
+
+
+def mcp_agy(e, secrets):
+    # agy resolves no variables at all: stdio servers inherit agy's
+    # environment (same name: nothing to write), everything else is plain.
+    plain = False
+    if e["transport"] == "stdio":
+        conf = {"command": e["command"], "args": e["args"], "env": {}}
+        for k, v in drop_unset(e["env"], secrets).items():
+            if exact_ref(v) == k:
+                continue
+            if var_refs(v):
+                plain = True
+            conf["env"][k] = subst(v, secrets)
+        return conf, plain
+    headers = {}
+    for k, v in drop_unset(e["headers"], secrets).items():
+        if var_refs(v):
+            plain = True
+        headers[k] = subst(v, secrets)
+    return {"serverUrl": e["url"], "headers": headers}, plain
+
+
+MCP_BUILDERS = {"claude": mcp_claude, "codex": mcp_codex, "copilot": mcp_copilot,
+                "opencode": mcp_opencode, "agy": mcp_agy}
+
+
+def mcp_norm(agent, conf):
+    """Comparable form of a stored server (fields the agent adds itself
+    and empty values dropped)."""
+    if not isinstance(conf, dict):
+        return conf
+    skip = {"copilot": ("tools", "source", "enabled"), "agy": ("disabled",)}.get(agent, ())
+    return {k: v for k, v in conf.items() if k not in skip and v not in ([], {}, None)}
+
+
+def mcp_equal(agent, current, wanted):
+    return current is not None and mcp_norm(agent, current) == mcp_norm(agent, wanted)
+
+
+def read_json_file(path):
+    """JSON object from path; {} when missing. ValueError when unusable."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return {}
+    except OSError as e:
+        raise ValueError(f"{path}: {e}")
+    if not text.strip():
+        return {}
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: kein JSON-Objekt")
+    return data
+
+
+def opencode_config_path():
+    base = home_path(".config/opencode")
+    for name in ("opencode.jsonc", "opencode.json"):
+        if os.path.isfile(os.path.join(base, name)):
+            return os.path.join(base, name)
+    return os.path.join(base, "opencode.json")
+
+
+def mcp_read(agent):
+    """{name: configuration} of the agent's user-level MCP servers."""
+    if agent == "codex":
+        try:
+            with open(home_path(MCP_FILES["codex"]), "rb") as f:
+                data = tomllib.load(f)
+        except FileNotFoundError:
+            return {}
+        except (OSError, tomllib.TOMLDecodeError) as e:
+            raise ValueError(f"{home_path(MCP_FILES['codex'])}: {e}")
+        servers = data.get("mcp_servers", {})
+    elif agent == "opencode":
+        path = opencode_config_path()
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                text = f.read()
+        except FileNotFoundError:
+            return {}
+        except OSError as e:
+            raise ValueError(f"{path}: {e}")
+        servers = jsonc_data(jsonc_parse(text)).get("mcp", {}) if text.strip() else {}
+    else:
+        servers = read_json_file(home_path(MCP_FILES[agent])).get("mcpServers", {})
+    return servers if isinstance(servers, dict) else {}
+
+
+# --- agenten: Codex config.toml ---------------------------------------------
+
+def toml_value(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, list):
+        return "[" + ", ".join(toml_value(x) for x in v) + "]"
+    return json.dumps(v, ensure_ascii=False)
+
+
+def toml_key(k):
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else json.dumps(k, ensure_ascii=False)
+
+
+def codex_tables(name, conf):
+    head = f"mcp_servers.{toml_key(name)}"
+    text = f"[{head}]\n"
+    subs = []
+    for k, v in conf.items():
+        if isinstance(v, dict):
+            subs.append((k, v))
+        else:
+            text += f"{toml_key(k)} = {toml_value(v)}\n"
+    for k, v in subs:
+        text += f"\n[{head}.{toml_key(k)}]\n"
+        text += "".join(f"{toml_key(a)} = {toml_value(b)}\n" for a, b in v.items())
+    return text
+
+
+CODEX_HEADER_RE = re.compile(
+    r'^\s*\[\s*mcp_servers\s*\.\s*(?:"((?:[^"\\]|\\.)*)"|([A-Za-z0-9_-]+))\s*(?:\..*)?\]\s*(?:#.*)?$')
+
+
+def toml_remove_servers(text, names):
+    """Removes the tables [mcp_servers.NAME] and [mcp_servers.NAME.*] of the
+    given names, line by line (comments elsewhere stay)."""
+    out, skipping = [], False
+    for line in text.splitlines(keepends=True):
+        if re.match(r"^\s*\[", line):
+            m = CODEX_HEADER_RE.match(line)
+            name = None
+            if m:
+                name = json.loads(f'"{m.group(1)}"') if m.group(1) is not None else m.group(2)
+            skipping = name in names
+        if not skipping:
+            out.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "".join(out))
+
+
+def codex_apply(to_set, to_remove, plain):
+    path = home_path(MCP_FILES["codex"])
+    try:
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+        mode = os.stat(path).st_mode & 0o777
+    except FileNotFoundError:
+        old, mode = "", 0o600
+    text = toml_remove_servers(old, set(to_set) | set(to_remove)).rstrip("\n")
+    for name, conf in to_set.items():
+        text += ("\n\n" if text else "") + codex_tables(name, conf).rstrip("\n")
+    text += "\n"
+    try:
+        servers = tomllib.loads(text).get("mcp_servers", {})
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"{path} wäre danach ungültig ({e}); nichts geändert")
+    if any(servers.get(n) != c for n, c in to_set.items()) or any(n in servers for n in to_remove):
+        raise ValueError(f"{path}: Die Einträge ließen sich nicht sauber ersetzen (eigene "
+                         "Schreibweise der Tabellen?); nichts geändert")
+    write_user_file(path, text, mode=0o600 if plain else mode)
+
+
+# --- agenten: JSONC (OpenCode) ------------------------------------------------
+# A small parser that keeps the positions of every value, so that single
+# members can be replaced, added or removed without touching comments.
+
+class JsoncParser:
+    NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null")
+
+    def __init__(self, text):
+        self.t = text
+
+    def ws(self, i):
+        t, n = self.t, len(self.t)
+        while i < n:
+            if t[i] in " \t\r\n﻿":
+                i += 1
+            elif t.startswith("//", i):
+                j = t.find("\n", i)
+                i = n if j < 0 else j + 1
+            elif t.startswith("/*", i):
+                j = t.find("*/", i + 2)
+                if j < 0:
+                    raise ValueError("Kommentar ohne Ende")
+                i = j + 2
+            else:
+                break
+        return i
+
+    def char(self, i):
+        return self.t[i] if i < len(self.t) else ""
+
+    def string_end(self, i):
+        j = i + 1
+        while j < len(self.t):
+            if self.t[j] == "\\":
+                j += 2
+            elif self.t[j] == '"':
+                return j + 1
+            else:
+                j += 1
+        raise ValueError("Zeichenkette ohne Ende")
+
+    def value(self, i):
+        i = self.ws(i)
+        c = self.char(i)
+        if c == "{":
+            node = {"k": "o", "s": i, "m": []}
+            i = self.ws(i + 1)
+            while self.char(i) != "}":
+                if self.char(i) != '"':
+                    raise ValueError(f"Schlüssel erwartet an Stelle {i}")
+                ke = self.string_end(i)
+                key = json.loads(self.t[i:ke])
+                j = self.ws(ke)
+                if self.char(j) != ":":
+                    raise ValueError(f"„:“ erwartet an Stelle {j}")
+                val = self.value(j + 1)
+                node["m"].append({"key": key, "ks": i, "v": val})
+                i = self.ws(val["e"])
+                if self.char(i) == ",":
+                    i = self.ws(i + 1)
+                elif self.char(i) != "}":
+                    raise ValueError(f"„,“ oder „}}“ erwartet an Stelle {i}")
+            node["e"] = i + 1
+            return node
+        if c == "[":
+            node = {"k": "a", "s": i, "items": []}
+            i = self.ws(i + 1)
+            while self.char(i) != "]":
+                val = self.value(i)
+                node["items"].append(val)
+                i = self.ws(val["e"])
+                if self.char(i) == ",":
+                    i = self.ws(i + 1)
+                elif self.char(i) != "]":
+                    raise ValueError(f"„,“ oder „]“ erwartet an Stelle {i}")
+            node["e"] = i + 1
+            return node
+        if c == '"':
+            j = self.string_end(i)
+            return {"k": "v", "s": i, "e": j, "v": json.loads(self.t[i:j])}
+        m = self.NUMBER_RE.match(self.t, i)
+        if not m:
+            raise ValueError(f"unerwartetes Zeichen an Stelle {i}")
+        return {"k": "v", "s": i, "e": m.end(), "v": json.loads(m.group(0))}
+
+
+def jsonc_parse(text):
+    p = JsoncParser(text)
+    node = p.value(0)
+    if p.ws(node["e"]) != len(text):
+        raise ValueError("Text nach dem Ende des JSON-Objekts")
+    return node
+
+
+def jsonc_data(node):
+    if node["k"] == "o":
+        return {m["key"]: jsonc_data(m["v"]) for m in node["m"]}
+    if node["k"] == "a":
+        return [jsonc_data(x) for x in node["items"]]
+    return node["v"]
+
+
+def line_indent(text, pos):
+    start = text.rfind("\n", 0, pos) + 1
+    return re.match(r"[ \t]*", text[start:pos]).group(0)
+
+
+def json_indented(value, indent):
+    return json.dumps(value, indent=2, ensure_ascii=False).replace("\n", "\n" + indent)
+
+
+def jsonc_set(text, path, value):
+    """Sets the member at path (list of keys) to value."""
+    node = jsonc_parse(text)
+    for depth, key in enumerate(path):
+        if node["k"] != "o":
+            raise ValueError(f"„{path[depth - 1]}“ ist kein Objekt")
+        member = next((m for m in node["m"] if m["key"] == key), None)
+        rest = path[depth + 1:]
+        if member is None:
+            for k in reversed(rest):
+                value = {k: value}
+            if node["m"]:
+                last = node["m"][-1]
+                ind = line_indent(text, last["ks"])
+                pos = last["v"]["e"]
+                return (text[:pos] + ",\n" + ind + json.dumps(key) + ": "
+                        + json_indented(value, ind) + text[pos:])
+            base = line_indent(text, node["s"])
+            ind = base + "  "
+            pos = node["s"] + 1
+            inner = text[pos:node["e"] - 1]
+            member_text = json.dumps(key) + ": " + json_indented(value, ind)
+            if not inner.strip():
+                return text[:pos] + "\n" + ind + member_text + "\n" + base + text[node["e"] - 1:]
+            return text[:pos] + "\n" + ind + member_text + text[pos:]
+        if not rest:
+            ind = line_indent(text, member["ks"])
+            return text[:member["v"]["s"]] + json_indented(value, ind) + text[member["v"]["e"]:]
+        node = member["v"]
+    return text
+
+
+def jsonc_remove(text, path):
+    """Removes the member at path; unchanged when it does not exist."""
+    p = JsoncParser(text)
+    node = jsonc_parse(text)
+    for key in path[:-1]:
+        member = next((m for m in node["m"] if m["key"] == key), None) if node["k"] == "o" else None
+        if member is None:
+            return text
+        node = member["v"]
+    if node["k"] != "o":
+        return text
+    members = node["m"]
+    idx = next((i for i, m in enumerate(members) if m["key"] == path[-1]), None)
+    if idx is None:
+        return text
+    member = members[idx]
+    start, end = member["ks"], member["v"]["e"]
+    j = p.ws(end)
+    if p.char(j) == ",":
+        line_start = text.rfind("\n", 0, start) + 1
+        if not text[line_start:start].strip():
+            start = line_start
+        end = j + 1
+        end += re.match(r"[ \t]*\n?", text[end:]).end()
+        return text[:start] + text[end:]
+    start = members[idx - 1]["v"]["e"] if idx > 0 else node["s"] + 1
+    return text[:start] + text[end:]
+
+
+def opencode_apply(to_set, to_remove):
+    path = opencode_config_path()
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            text = f.read()
+        mode = os.stat(path).st_mode & 0o777
+    except FileNotFoundError:
+        text, mode = "", 0o644
+    if not text.strip():
+        text = '{\n  "$schema": "https://opencode.ai/config.json"\n}\n'
+    for name in to_remove:
+        text = jsonc_remove(text, ["mcp", name])
+    for name, conf in to_set.items():
+        text = jsonc_set(text, ["mcp", name], conf)
+    servers = jsonc_data(jsonc_parse(text)).get("mcp", {})
+    if any(servers.get(n) != c for n, c in to_set.items()) or any(n in servers for n in to_remove):
+        raise ValueError(f"{path}: Die Einträge ließen sich nicht sauber ersetzen; nichts geändert")
+    write_user_file(path, text, mode=mode)
+
+
+# --- agenten: MCP apply --------------------------------------------------------
+
+def mcp_cli_set(agent, name, conf, present):
+    """Adds (or replaces) one server with the agent's own command.
+    Returns None or an error text."""
+    if agent == "claude":
+        if present:
+            run_agent(["claude", "mcp", "remove", "-s", "user", name])
+        rc, out = run_agent(["claude", "mcp", "add-json", "-s", "user", name, json.dumps(conf)])
+    elif agent == "copilot":
+        if present:
+            run_agent(["copilot", "mcp", "remove", name])
+        if conf["type"] == "local":
+            cmd = ["copilot", "mcp", "add"]
+            for k, v in conf.get("env", {}).items():
+                cmd += ["--env", f"{k}={v}"]
+            cmd += [name, "--", conf["command"]] + conf.get("args", [])
+        else:
+            cmd = ["copilot", "mcp", "add", "--transport", "http"]
+            for k, v in conf.get("headers", {}).items():
+                cmd += ["--header", f"{k}: {v}"]
+            cmd += [name, conf["url"]]
+        rc, out = run_agent(cmd)
+    else:  # agy: "add or update"
+        cmd = ["agy", "mcp", "add"]
+        if "serverUrl" in conf:
+            for k, v in conf.get("headers", {}).items():
+                cmd += ["--header", f"{k}: {v}"]
+            cmd += [name, conf["serverUrl"]]
+        else:
+            for k, v in conf.get("env", {}).items():
+                cmd += ["--env", f"{k}={v}"]
+            cmd += [name, "--", conf["command"]] + conf.get("args", [])
+        rc, out = run_agent(cmd)
+    return None if rc == 0 else last_line(out)
+
+
+def mcp_cli_remove(agent, name):
+    cmd = {"claude": ["claude", "mcp", "remove", "-s", "user", name],
+           "copilot": ["copilot", "mcp", "remove", name],
+           "agy": ["agy", "mcp", "remove", name]}[agent]
+    rc, out = run_agent(cmd)
+    return None if rc == 0 else last_line(out)
+
+
+def secure_agy_config():
+    """agy writes its file world-readable; it may hold a key in plain text."""
+    path = home_path(MCP_FILES["agy"])
+    if os.path.isfile(path) and os.stat(path).st_mode & 0o077:
+        os.chmod(path, 0o600)
+
+
+def sync_mcp(agent, desired, plain, managed, report):
+    """Brings the agent's MCP servers in line; returns the managed names."""
+    try:
+        current = mcp_read(agent)
+    except ValueError as e:
+        report["fehler"].append(f"MCP-Konfiguration nicht lesbar, nichts geändert: {e}")
+        return sorted(managed)
+    to_set = {n: c for n, c in desired.items() if not mcp_equal(agent, current.get(n), c)}
+    to_remove = [n for n in sorted(managed) if n not in desired and n in current]
+    failed = set()
+    if agent in ("codex", "opencode"):
+        if to_set or to_remove:
+            try:
+                if agent == "codex":
+                    codex_apply(to_set, to_remove, plain)
+                else:
+                    opencode_apply(to_set, to_remove)
+            except (ValueError, CliError) as e:
+                report["fehler"].append(f"MCP: {e}")
+                failed = set(to_set) | set(to_remove)
+    else:
+        for name in to_remove:
+            err = mcp_cli_remove(agent, name)
+            if err:
+                report["fehler"].append(f"MCP {name} nicht entfernt: {err}")
+                failed.add(name)
+        for name, conf in to_set.items():
+            err = mcp_cli_set(agent, name, conf, name in current)
+            if err:
+                report["fehler"].append(f"MCP {name} nicht eingetragen: {err}")
+                failed.add(name)
+        if agent == "agy":
+            secure_agy_config()
+    for name in to_set:
+        if name in failed:
+            continue
+        if name not in current:
+            report["aenderungen"].append(f"MCP {name} eingetragen")
+        elif name in managed:
+            report["aenderungen"].append(f"MCP {name} aktualisiert")
+        else:
+            report["aenderungen"].append(f"MCP {name} übernommen (ersetzt einen Eintrag "
+                                         "gleichen Namens)")
+    for name in to_remove:
+        if name not in failed:
+            report["aenderungen"].append(f"MCP {name} entfernt")
+    keep = {n for n in desired if n not in failed or n in managed}
+    keep |= {n for n in to_remove if n in failed}
+    return sorted(keep)
+
+
+# --- agenten: skills -----------------------------------------------------------
+
+def exe_fingerprint(command):
+    path = shutil.which(command)
+    if not path:
+        return f"{command}:fehlt"
+    real = os.path.realpath(path)
+    try:
+        st = os.stat(real)
+    except OSError:
+        return real
+    return f"{real}:{st.st_size}:{int(st.st_mtime)}"
+
+
+def tree_signature(path):
+    """(relative path, content hash or link target, executable) of every
+    file below path - to compare two skill folders."""
+    sig = []
+    for root, dirs, files in os.walk(path):
+        dirs.sort()
+        for name in sorted(files):
+            full = os.path.join(root, name)
+            rel = os.path.relpath(full, path)
+            if os.path.islink(full):
+                sig.append((rel, "->" + os.readlink(full), False))
+                continue
+            try:
+                with open(full, "rb") as f:
+                    digest = hashlib.sha256(f.read()).hexdigest()
+            except OSError:
+                digest = "?"
+            sig.append((rel, digest, os.access(full, os.X_OK)))
+    return sig
+
+
+def run_vendor(cmd, name, work):
+    """Runs a vendor command with a throwaway HOME (it writes into HOME and
+    the working directory); returns ({target: skill folder}, sandbox, error)."""
+    sandbox = tempfile.mkdtemp(prefix="sandbox-", dir=work)
+    cwd = os.path.join(sandbox, "arbeit")
+    os.makedirs(cwd)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("XDG_")}
+    env["HOME"] = sandbox
+    rc, out = capture(cmd, 300, env=env, cwd=cwd)
+    found = {}
+    for ziel, rels in SKILL_FOUND.items():
+        for base in (sandbox, cwd):
+            for rel in rels:
+                path = os.path.join(base, rel, name)
+                if os.path.isfile(os.path.join(path, "SKILL.md")):
+                    found.setdefault(ziel, path)
+    if rc != 0:
+        return found, sandbox, f"{' '.join(cmd)}: {last_line(out)}"
+    if not found:
+        return found, sandbox, f"{' '.join(cmd)} hat keinen Skill „{name}“ angelegt"
+    return found, sandbox, None
+
+
+def pick_found(found, ziel):
+    for z in (ziel, "agents", "claude", "antigravity"):
+        if z in found:
+            return found[z]
+    return None
+
+
+def skill_sources(entry):
+    """{target: folder} of a skill. Vendor commands run once per image
+    build and definition; the result is kept in ~/.clawbook/agenten/quellen.
+    Raises ValueError on failure."""
+    quelle = entry["quelle"]
+    if "verzeichnis" in quelle:
+        if not os.path.isfile(os.path.join(quelle["verzeichnis"], "SKILL.md")):
+            raise ValueError(f"{quelle['verzeichnis']} enthält kein SKILL.md")
+        return {z: quelle["verzeichnis"] for z in SKILL_TARGETS}
+    if "verzeichnis_je_ziel" in quelle:
+        for d in quelle["verzeichnis_je_ziel"].values():
+            if not os.path.isfile(os.path.join(d, "SKILL.md")):
+                raise ValueError(f"{d} enthält kein SKILL.md")
+        return dict(quelle["verzeichnis_je_ziel"])
+    cmds = ([quelle["befehl"]] if "befehl" in quelle
+            else list(quelle["befehl_je_ziel"].values()))
+    key = hashlib.sha256(json.dumps(
+        [quelle, read_build().get("commit"), [exe_fingerprint(c[0]) for c in cmds]],
+        sort_keys=True).encode()).hexdigest()[:16]
+    work = agenten_work_dir()
+    base = os.path.join(work, "quellen", entry["name"])
+    cache = os.path.join(base, key)
+    if os.path.isfile(os.path.join(cache, ".fertig")):
+        return {z: os.path.join(cache, z) for z in SKILL_TARGETS
+                if os.path.isdir(os.path.join(cache, z))}
+    os.makedirs(base, exist_ok=True)
+    new = tempfile.mkdtemp(prefix=".neu-", dir=base)
+    sandboxes = []
+    try:
+        if "befehl" in quelle:
+            found, sandbox, err = run_vendor(quelle["befehl"], entry["name"], work)
+            sandboxes.append(sandbox)
+            if err:
+                raise ValueError(err)
+            picked = {z: pick_found(found, z) for z in SKILL_TARGETS}
+        else:
+            picked = {}
+            for ziel, cmd in quelle["befehl_je_ziel"].items():
+                found, sandbox, err = run_vendor(cmd, entry["name"], work)
+                sandboxes.append(sandbox)
+                if err:
+                    raise ValueError(err)
+                picked[ziel] = pick_found(found, ziel)
+        for ziel, src in picked.items():
+            if src:
+                shutil.copytree(src, os.path.join(new, ziel), symlinks=True)
+        with open(os.path.join(new, ".fertig"), "w", encoding="utf-8") as f:
+            f.write(now_text() + "\n")
+        for old in os.listdir(base):
+            if old != os.path.basename(new):
+                shutil.rmtree(os.path.join(base, old), ignore_errors=True)
+        os.rename(new, cache)
+    finally:
+        shutil.rmtree(new, ignore_errors=True)
+        for sandbox in sandboxes:
+            shutil.rmtree(sandbox, ignore_errors=True)
+    return {z: os.path.join(cache, z) for z in SKILL_TARGETS
+            if os.path.isdir(os.path.join(cache, z))}
+
+
+def install_skill(src, ziel, name, managed):
+    """Copies the skill folder into the shared skill folder of the target.
+    Returns the change text or None (already the same)."""
+    parent = home_path(SKILL_TARGETS[ziel])
+    dst = os.path.join(parent, name)
+    note = None
+    if os.path.lexists(dst):
+        if (os.path.isdir(dst) and not os.path.islink(dst)
+                and tree_signature(dst) == tree_signature(src)):
+            return None if name in managed else f"Skill {name} übernommen"
+        if name not in managed:
+            backup = os.path.join(agenten_work_dir(), "sicherung",
+                                  f"{ziel}-{name}-{now_text().replace(':', '')}")
+            os.makedirs(os.path.dirname(backup), exist_ok=True)
+            shutil.move(dst, backup)
+            note = f"bisherige Fassung gesichert in {backup}"
+    os.makedirs(parent, exist_ok=True)
+    tmp = os.path.join(parent, f".clawbook-neu-{name}")
+    old = os.path.join(parent, f".clawbook-alt-{name}")
+    for path in (tmp, old):
+        shutil.rmtree(path, ignore_errors=True)
+    shutil.copytree(src, tmp, symlinks=True)
+    existed = os.path.lexists(dst)
+    if existed:
+        os.rename(dst, old)
+    os.rename(tmp, dst)
+    shutil.rmtree(old, ignore_errors=True)
+    text = f"Skill {name} {'aktualisiert' if existed else 'eingerichtet'}"
+    return f"{text} ({note})" if note else text
+
+
+def remove_skill(ziel, name):
+    dst = os.path.join(home_path(SKILL_TARGETS[ziel]), name)
+    if os.path.islink(dst):
+        os.unlink(dst)
+    elif os.path.isdir(dst):
+        shutil.rmtree(dst)
+
+
+# --- agenten: instructions -----------------------------------------------------
+
+def instruction_text(entries, agent, report):
+    parts = []
+    for e in sorted(entries, key=lambda x: (x["reihenfolge"], x["name"])):
+        if agent not in e["agenten"]:
+            continue
+        if "text" in e:
+            parts.append(e["text"].strip())
+            continue
+        try:
+            with open(e["datei"], encoding="utf-8") as f:
+                parts.append(f.read().strip())
+        except OSError as err:
+            report.append(f"Anweisung {e['name']}: {e['datei']} nicht lesbar ({err})")
+    return "\n\n".join(p for p in parts if p)
+
+
+def instruction_content(agent, text):
+    """What sync writes: a marked block, for Antigravity a file of its own."""
+    if agent == "agy":
+        return f"{AGY_RULE_HEAD}{AGY_RULE_NOTE}\n\n{text}\n"
+    return f"{BLOCK_START}\n{BLOCK_NOTE}\n\n{text}\n{BLOCK_END}\n"
+
+
+def block_span(text):
+    """(start, end) of the marked block in text, None when there is none.
+    ValueError when the end marker is missing."""
+    start = text.find(BLOCK_START)
+    if start < 0:
+        return None
+    end = text.find(BLOCK_END, start)
+    if end < 0:
+        raise ValueError("Anfangsmarkierung ohne Endmarkierung")
+    end += len(BLOCK_END)
+    if text[end:end + 1] == "\n":
+        end += 1
+    return start, end
+
+
+def instruction_current(agent):
+    """The block (or rules file) as it is now, or None."""
+    path = home_path(INSTRUCTION_FILES[agent])
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError:
+        return None
+    if agent == "agy":
+        return text
+    span = block_span(text)
+    return text[span[0]:span[1]] if span else None
+
+
+def sync_instruction(agent, text, managed, report):
+    """Writes, replaces or removes the instruction block. Returns True when
+    sync manages it afterwards."""
+    path = home_path(INSTRUCTION_FILES[agent])
+    wanted = instruction_content(agent, text) if text else None
+    try:
+        with open(path, encoding="utf-8") as f:
+            old = f.read()
+        mode = os.stat(path).st_mode & 0o777
+    except FileNotFoundError:
+        old, mode = None, 0o644
+    if agent == "agy":
+        if old == wanted:
+            return wanted is not None
+        if wanted is None:
+            if old is not None and managed:
+                os.remove(path)
+                report["aenderungen"].append("Anweisungen entfernt")
+            return False
+        if old is not None and not managed:
+            backup = os.path.join(agenten_work_dir(), "sicherung",
+                                  f"agy-clawbook.md-{now_text().replace(':', '')}")
+            os.makedirs(os.path.dirname(backup), exist_ok=True)
+            shutil.copy2(path, backup)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        write_user_file(path, wanted)
+        report["aenderungen"].append("Anweisungen " + ("eingerichtet" if old is None
+                                                       else "aktualisiert"))
+        return True
+    try:
+        span = block_span(old or "")
+    except ValueError as e:
+        report["fehler"].append(f"{path}: {e}; Anweisungen nicht geändert")
+        return managed
+    if span is None:
+        if wanted is None:
+            return False
+        new = (old.rstrip("\n") + "\n\n" if old and old.strip() else "") + wanted
+        verb = "eingerichtet"
+    else:
+        current = old[span[0]:span[1]]
+        if current == wanted:
+            return True
+        if wanted is None:
+            if not managed:
+                return False
+            before, after = old[:span[0]].rstrip("\n"), old[span[1]:].lstrip("\n")
+            new = before + ("\n\n" if before and after else "\n" if before else "") + after
+            verb = "entfernt"
+        else:
+            new = old[:span[0]] + wanted + old[span[1]:]
+            verb = "aktualisiert"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if verb == "entfernt" and not new.strip() and old is not None:
+        os.remove(path)
+    else:
+        write_user_file(path, new, mode=mode)
+    report["aenderungen"].append(f"Anweisungen {verb}")
+    return wanted is not None
+
+
+# --- agenten: sync ------------------------------------------------------------
+
+def agenten_stand_path():
+    return os.path.join(state_dir(), AGENTEN_STAND)
+
+
+def read_agenten_stand():
+    try:
+        data = read_json(agenten_stand_path())
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    verwaltet = data.get("verwaltet") if isinstance(data.get("verwaltet"), dict) else {}
+    for part in ("mcp", "skill", "anweisung"):
+        if not isinstance(verwaltet.get(part), dict):
+            verwaltet[part] = {}
+    data["verwaltet"] = verwaltet
+    return data
+
+
+def installed_agents():
+    return {a: shutil.which(AGENT_CMD[a]) is not None for a in AGENT_IDS}
+
+
+def active_ziele(installed):
+    return sorted({AGENT_ZIEL[a] for a in AGENT_IDS if installed[a]})
+
+
+def ziel_agents(ziel, installed):
+    return [a for a in AGENT_IDS if AGENT_ZIEL[a] == ziel and installed[a]]
+
+
+class SyncLock:
+    """One sync at a time (start of the container, package changes, menu)."""
+
+    def __enter__(self):
+        self.f = open(os.path.join(agenten_work_dir(), "sync.lock"), "w", encoding="utf-8")
+        deadline = time.time() + 600
+        while True:
+            try:
+                fcntl.flock(self.f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return self
+            except BlockingIOError:
+                if time.time() > deadline:
+                    raise CliError("Ein anderer Abgleich der Agenten-Ausstattung läuft seit "
+                                   "über zehn Minuten; bitte später erneut versuchen.")
+                time.sleep(1)
+
+    def __exit__(self, *exc):
+        self.f.close()
+
+
+def agenten_sync():
+    """Carries all entries into every installed agent. Returns the result."""
+    with SyncLock():
+        return agenten_sync_locked()
+
+
+def agenten_sync_locked():
+    entries, warnings = load_entries()
+    secrets = read_secrets()
+    stand = read_agenten_stand()
+    verwaltet = stand["verwaltet"]
+    installed = installed_agents()
+    active = {n: e for n, e in entries.items() if not e["aus"]}
+    missing = {n: entry_missing(e, secrets) for n, e in active.items()}
+    usable = {n: e for n, e in active.items() if not missing[n]}
+    result = {"ok": True, "geaendert": False, "zeit": now_text(), "warnungen": warnings,
+              "weggelassen": [{"name": n, "art": active[n]["art"], "fehlt": m}
+                              for n, m in missing.items() if m],
+              "agenten": {}, "skills": {}, "hinweise": []}
+    new_verwaltet = {"mcp": {}, "skill": {}, "anweisung": {}}
+    anweisungen = [e for e in usable.values() if e["art"] == "anweisung"]
+    for agent in AGENT_IDS:
+        report = {"name": AGENT_NAMES[agent], "installiert": installed[agent],
+                  "aenderungen": [], "fehler": []}
+        result["agenten"][agent] = report
+        if not installed[agent]:
+            new_verwaltet["mcp"][agent] = verwaltet["mcp"].get(agent, [])
+            new_verwaltet["anweisung"][agent] = verwaltet["anweisung"].get(agent, False)
+            continue
+        desired, plain = {}, False
+        for n, e in usable.items():
+            if e["art"] == "mcp" and agent in e["agenten"]:
+                conf, is_plain = MCP_BUILDERS[agent](e, secrets)
+                desired[n] = conf
+                plain = plain or is_plain
+        managed = set(verwaltet["mcp"].get(agent, []))
+        new_verwaltet["mcp"][agent] = sync_mcp(agent, desired, plain, managed, report)
+        if agent == "agy" and plain and any(a.startswith("MCP") for a in report["aenderungen"]):
+            result["hinweise"].append(
+                "Antigravity löst keine Variablen auf: Schlüssel für HTTP-MCP-Server stehen "
+                f"im Klartext in ~/{MCP_FILES['agy']} (Datei nur für Sie lesbar).")
+        notes = []
+        text = instruction_text(anweisungen, agent, notes)
+        report["fehler"] += notes
+        new_verwaltet["anweisung"][agent] = sync_instruction(
+            agent, text, verwaltet["anweisung"].get(agent, False) is True, report)
+    for ziel in SKILL_TARGETS:
+        agents = ziel_agents(ziel, installed)
+        managed = set(verwaltet["skill"].get(ziel, []))
+        report = {"agenten": agents, "ordner": "~/" + SKILL_TARGETS[ziel],
+                  "aenderungen": [], "fehler": []}
+        result["skills"][ziel] = report
+        if not agents:
+            new_verwaltet["skill"][ziel] = sorted(managed)
+            continue
+        keep = set()
+        for n, e in usable.items():
+            if e["art"] != "skill" or not any(a in e["agenten"] for a in agents):
+                continue
+            try:
+                sources = skill_sources(e)
+            except (ValueError, OSError) as err:
+                report["fehler"].append(f"Skill {n}: {err}")
+                if n in managed:
+                    keep.add(n)
+                continue
+            if ziel not in sources:
+                continue
+            try:
+                change = install_skill(sources[ziel], ziel, n, managed)
+            except OSError as err:
+                report["fehler"].append(f"Skill {n}: {err}")
+                if n in managed:
+                    keep.add(n)
+                continue
+            keep.add(n)
+            if change:
+                report["aenderungen"].append(change)
+        for n in sorted(managed - keep):
+            try:
+                remove_skill(ziel, n)
+                report["aenderungen"].append(f"Skill {n} entfernt")
+            except OSError as err:
+                report["fehler"].append(f"Skill {n} nicht entfernt: {err}")
+                keep.add(n)
+        new_verwaltet["skill"][ziel] = sorted(keep)
+    reports = list(result["agenten"].values()) + list(result["skills"].values())
+    result["geaendert"] = any(r["aenderungen"] for r in reports)
+    result["ok"] = not any(r["fehler"] for r in reports)
+    data = {"format": AGENTEN_STAND_FORMAT, "verwaltet": new_verwaltet,
+            "letzter_sync": {"zeit": result["zeit"], "ok": result["ok"],
+                             "geaendert": result["geaendert"],
+                             "weggelassen": result["weggelassen"],
+                             "fehler": [f"{r.get('name', r.get('ordner'))}: {x}"
+                                        for r in reports for x in r["fehler"]]}}
+    write_user_file(agenten_stand_path(), dump_json(data), tmp_dir=agenten_work_dir())
+    return result
+
+
+def missing_text(item):
+    return (f"  {item['name']:<14} fehlt {', '.join(item['fehlt'])}  (setzen: clawbook "
+            f"agenten schluessel {item['fehlt'][0]})")
+
+
+def print_sync(result):
+    for agent, r in result["agenten"].items():
+        if not r["installiert"]:
+            print(f"  {r['name'] + ':':<14} nicht installiert")
+            continue
+        text = "; ".join(r["aenderungen"]) or "unverändert"
+        print(f"  {r['name'] + ':':<14} {text}")
+        for err in r["fehler"]:
+            print(f"  {'':<14} FEHLER: {err}")
+    for ziel, r in result["skills"].items():
+        if not r["agenten"]:
+            continue
+        who = ", ".join(AGENT_NAMES[a] for a in r["agenten"])
+        text = "; ".join(r["aenderungen"]) or "unverändert"
+        print(f"  Skills {r['ordner']} ({who}): {text}")
+        for err in r["fehler"]:
+            print(f"      FEHLER: {err}")
+    if result["weggelassen"]:
+        print("Nicht eingetragen, weil ein Schlüssel fehlt:")
+        for item in result["weggelassen"]:
+            print(missing_text(item))
+    for text in result["hinweise"]:
+        print(f"Hinweis: {text}")
+    for text in result["warnungen"]:
+        print(f"Warnung: {text}")
+    if not result["ok"]:
+        print("Der Abgleich hatte Fehler (siehe oben); Details: clawbook agenten status")
+    elif result["geaendert"]:
+        print("Fertig. Laufende Agenten sehen die Änderungen nach einem Neustart.")
+    else:
+        print("Alles aktuell, nichts geändert.")
+
+
+def cmd_agenten_sync(opts):
+    if not opts["json"]:
+        print("Agenten-Ausstattung abgleichen ...", flush=True)
+    result = agenten_sync()
+    if opts["json"]:
+        sys.stdout.write(dump_json(result))
+    else:
+        print_sync(result)
+    return 0 if result["ok"] else 1
+
+
+def as_user_env(cmd):
+    """cmd as the working user with its own home (from root)."""
+    return ["runuser", "-u", USER_NAME, "--", "env", f"HOME={user_home()}",
+            f"USER={USER_NAME}", f"LOGNAME={USER_NAME}"] + cmd
+
+
+def agenten_sync_quiet():
+    """Sync after a change (packages, start of the container) as the
+    working user. Never raises; returns the result (or ok False)."""
+    if os.geteuid() == 0:
+        rc, out = run_stdout(as_user_env([sys.executable, "-I", os.path.abspath(__file__),
+                                           "agenten", "sync", "--json"]), timeout=1800)
+        try:
+            data = json.loads(out)
+            if isinstance(data, dict) and "ok" in data:
+                return data
+        except ValueError:
+            pass
+        return {"ok": False, "geaendert": False, "weggelassen": [],
+                "fehler": f"clawbook agenten sync: Exit-Code {rc}"}
+    try:
+        return agenten_sync()
+    except (CliError, OSError) as e:
+        return {"ok": False, "geaendert": False, "weggelassen": [], "fehler": str(e)}
+
+
+def sync_summary(result):
+    if result.get("fehler"):
+        return f"Agenten-Ausstattung: nicht abgeglichen ({result['fehler']})"
+    text = ("Agenten-Ausstattung: abgeglichen" if result.get("geaendert")
+            else "Agenten-Ausstattung: aktuell")
+    if not result.get("ok"):
+        text += " - mit Fehlern (clawbook agenten status)"
+    missing = [i["name"] for i in result.get("weggelassen", [])]
+    if missing:
+        text += f"; ohne Schlüssel nicht eingetragen: {', '.join(missing)}"
+    return text
+
+
+def sync_after_change(opts):
+    """For pakete add/remove: sync and tell it in one line."""
+    say(opts, "Agenten-Ausstattung wird abgeglichen ...")
+    result = agenten_sync_quiet()
+    say(opts, sync_summary(result))
+    return {"ok": result.get("ok", False), "geaendert": result.get("geaendert", False)}
+
+
+# --- agenten: status ---------------------------------------------------------
+
+STATUS_CELL = {"eingetragen": "ja", "fehlt": "FEHLT", "abweichend": "ANDERS",
+               "schluessel_fehlt": "SCHLÜSSEL", "nicht_vorgesehen": "-", "aus": "aus",
+               "nicht_installiert": "n. inst."}
+
+
+def cached_sources(entry):
+    """Skill folders from an earlier sync (never runs a command)."""
+    quelle = entry["quelle"]
+    if "verzeichnis" in quelle:
+        return {z: quelle["verzeichnis"] for z in SKILL_TARGETS}
+    if "verzeichnis_je_ziel" in quelle:
+        return dict(quelle["verzeichnis_je_ziel"])
+    base = os.path.join(state_dir(), AGENTEN_WORK_DIR, "quellen", entry["name"])
+    try:
+        for key in os.listdir(base):
+            cache = os.path.join(base, key)
+            if os.path.isfile(os.path.join(cache, ".fertig")):
+                return {z: os.path.join(cache, z) for z in SKILL_TARGETS
+                        if os.path.isdir(os.path.join(cache, z))}
+    except OSError:
+        pass
+    return {}
+
+
+def collect_agenten_status():
+    entries, warnings = load_entries()
+    secrets = read_secrets()
+    stand = read_agenten_stand()
+    installed = installed_agents()
+    servers = {}
+    for agent in AGENT_IDS:
+        try:
+            servers[agent] = mcp_read(agent) if installed[agent] else {}
+        except ValueError:
+            servers[agent] = None
+    anweisungen = [e for e in entries.values() if e["art"] == "anweisung" and not e["aus"]
+                   and not entry_missing(e, secrets)]
+    instructions = {}
+    for agent in AGENT_IDS:
+        text = instruction_text(anweisungen, agent, [])
+        instructions[agent] = (instruction_content(agent, text) if text else None,
+                               instruction_current(agent) if installed[agent] else None)
+    rows = []
+    for name, e in entries.items():
+        miss = [] if e["aus"] else entry_missing(e, secrets)
+        row = {"name": name, "art": e["art"], "herkunft": e["herkunft"], "aus": e["aus"],
+               "beschreibung": e["beschreibung"], "fehlende_schluessel": miss, "agenten": {}}
+        sources = cached_sources(e) if e["art"] == "skill" and not e["aus"] else {}
+        for agent in AGENT_IDS:
+            if not installed[agent]:
+                state = "nicht_installiert"
+            elif agent not in e["agenten"]:
+                state = "nicht_vorgesehen"
+            elif e["aus"]:
+                state = "aus"
+            elif miss:
+                state = "schluessel_fehlt"
+            elif e["art"] == "mcp":
+                current = (servers[agent] or {}).get(name)
+                wanted, _ = MCP_BUILDERS[agent](e, secrets)
+                state = ("fehlt" if current is None else
+                         "eingetragen" if mcp_equal(agent, current, wanted) else "abweichend")
+            elif e["art"] == "skill":
+                ziel = AGENT_ZIEL[agent]
+                dst = os.path.join(home_path(SKILL_TARGETS[ziel]), name)
+                if not os.path.isfile(os.path.join(dst, "SKILL.md")):
+                    state = "fehlt"
+                elif ziel in sources and tree_signature(dst) != tree_signature(sources[ziel]):
+                    state = "abweichend"
+                else:
+                    state = "eingetragen"
+            else:
+                wanted, current = instructions[agent]
+                state = ("fehlt" if current is None else
+                         "eingetragen" if current == wanted else "abweichend")
+            row["agenten"][agent] = state
+        rows.append(row)
+    needed = sorted({v for e in entries.values() if not e["aus"]
+                     for v in e.get("benoetigt", [])})
+    return {"agenten": {a: {"name": AGENT_NAMES[a], "installiert": installed[a]}
+                        for a in AGENT_IDS},
+            "eintraege": rows,
+            "schluessel": {"datei": secrets_path(), "gesetzt": sorted(secrets),
+                           "benoetigt": needed,
+                           "fehlen": [v for v in needed if v not in secrets]},
+            "letzter_sync": stand.get("letzter_sync"),
+            "warnungen": warnings}
+
+
+def print_agenten_status(s):
+    print("Agenten-Ausstattung")
+    head = f"  {'Eintrag':<16} {'Art':<10}" + "".join(
+        f" {s['agenten'][a]['name']:<12}" for a in AGENT_IDS)
+    print(head)
+    for row in s["eintraege"]:
+        cells = "".join(f" {STATUS_CELL[row['agenten'][a]]:<12}" for a in AGENT_IDS)
+        print(f"  {row['name']:<16} {row['art'] or '':<10}{cells}")
+    print("  ja = eingetragen, FEHLT/ANDERS = beim nächsten Abgleich (clawbook agenten sync),")
+    print("  SCHLÜSSEL = ein Schlüssel fehlt, - = für diesen Agenten nicht vorgesehen")
+    k = s["schluessel"]
+    if k["benoetigt"]:
+        print("Schlüssel (Werte werden nie angezeigt):")
+        for name in k["benoetigt"]:
+            print(f"  {name:<20} {'gesetzt' if name in k['gesetzt'] else 'fehlt'}")
+    if k["fehlen"]:
+        print(f"Setzen mit: clawbook agenten schluessel {k['fehlen'][0]}")
+    last = s["letzter_sync"]
+    if last:
+        print(f"Letzter Abgleich: {last.get('zeit')}"
+              + ("" if last.get("ok") else " - mit Fehlern:"))
+        for err in last.get("fehler") or []:
+            print(f"  {err}")
+    else:
+        print("Noch kein Abgleich (clawbook agenten sync).")
+    for text in s["warnungen"]:
+        print(f"Warnung: {text}")
+
+
+def cmd_agenten_status(opts):
+    s = collect_agenten_status()
+    if opts["json"]:
+        sys.stdout.write(dump_json(s))
+    else:
+        print_agenten_status(s)
+    return 0
+
+
+# --- agenten: keys (command) ---------------------------------------------------
+
+def check_secret_name(name):
+    if not SECRET_NAME_RE.match(name):
+        raise CliError(f"„{name}“ ist kein gültiger Name (Großbuchstaben, Ziffern, _; "
+                       "zum Beispiel STITCH_API_KEY).", code=2)
+    if name in SECRET_REFUSED:
+        raise CliError(f"{name} speichert clawbook nicht: {SECRET_REFUSED[name]}. "
+                       "Melden Sie das Werkzeug stattdessen an, wie es die Setup-Seite "
+                       "beschreibt.", code=2)
+
+
+def read_secret_value(name, opts):
+    """Hidden on a terminal, otherwise one line from stdin."""
+    if sys.stdin.isatty() and not opts["json"]:
+        try:
+            value = getpass.getpass(f"Wert für {name} (Eingabe bleibt unsichtbar): ")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            raise CliError("Abgebrochen, nichts geändert.")
+    else:
+        value = sys.stdin.readline()
+    value = value.strip()
+    if "\n" in value or "\r" in value:
+        raise CliError("Der Wert darf keinen Zeilenumbruch enthalten.", code=2)
+    return value
+
+
+def cmd_agenten_schluessel(opts, args):
+    if len(args) != 1:
+        s = collect_agenten_status()["schluessel"]
+        lines = ["Aufruf: clawbook agenten schluessel <NAME> [--entfernen] [--json]"]
+        if s["benoetigt"]:
+            lines.append("Benötigte Schlüssel: " + ", ".join(
+                f"{n} ({'gesetzt' if n in s['gesetzt'] else 'fehlt'})" for n in s["benoetigt"]))
+        raise CliError("\n".join(lines), code=2)
+    name = args[0]
+    check_secret_name(name)
+    values = read_secrets()
+    if opts["entfernen"]:
+        existed = values.pop(name, None) is not None
+        write_secrets(values)
+        say(opts, f"Schlüssel {name} entfernt." if existed
+            else f"Schlüssel {name} war nicht gesetzt.")
+    else:
+        value = read_secret_value(name, opts)
+        if not value:
+            raise CliError("Leere Eingabe, nichts geändert. Entfernen mit: clawbook agenten "
+                           f"schluessel {name} --entfernen", code=2)
+        values[name] = value
+        write_secrets(values)
+        say(opts, f"Schlüssel {name} gespeichert in {secrets_path()} (nur für Sie lesbar).")
+    say(opts, "Agenten-Ausstattung wird abgeglichen ...")
+    result = agenten_sync()
+    if opts["json"]:
+        sys.stdout.write(dump_json({"name": name, "entfernt": bool(opts["entfernen"]),
+                                    "sync": result}))
+    else:
+        print_sync(result)
+        print("Neue Terminals sehen den Schlüssel als Umgebungsvariable; laufende Agenten "
+              "bitte neu starten.")
+        print(f"Im aktuellen Terminal: . {SECRETS_PROFILE}")
+    return 0 if result["ok"] else 1
+
+
+def cmd_agenten(opts, args):
+    usage = ("Aufruf: clawbook agenten [status | sync | schluessel <NAME> [--entfernen]] "
+             "[--json]")
+    if not args:
+        if opts["json"] or not is_terminal():
+            return cmd_agenten_status(opts)
+        menu_agenten()
+        return 0
+    sub, rest = args[0], args[1:]
+    if sub == "status" and not rest:
+        return cmd_agenten_status(opts)
+    if sub == "sync" and not rest:
+        return cmd_agenten_sync(opts)
+    if sub == "schluessel":
+        return cmd_agenten_schluessel(opts, rest)
+    raise CliError(usage, code=2)
+
+
+def menu_agenten():
+    """Menu "Agenten-Ausstattung": status, keys, sync."""
+    while True:
+        print()
+        print_agenten_status(collect_agenten_status())
+        print()
+        print("  s  jetzt abgleichen (clawbook agenten sync)")
+        print("  k  Schlüssel setzen oder ändern")
+        print("  Enter  zurück")
+        try:
+            choice = input("Ihre Wahl: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not choice or choice in ("0", "q", "x"):
+            return
+        try:
+            if choice == "s":
+                cmd_agenten_sync(plain())
+            elif choice == "k":
+                menu_agenten_key()
+            else:
+                print("Bitte s, k oder Enter.")
+        except CliError as e:
+            print(f"Fehler: {e}")
+
+
+def menu_agenten_key():
+    keys = collect_agenten_status()["schluessel"]
+    names = keys["benoetigt"]
+    print()
+    print("Schlüssel für die Agenten-Ausstattung (den Wert erhalten Sie beim Anbieter")
+    print("oder im Kurs, siehe die Setup-Seiten):")
+    for i, n in enumerate(names, 1):
+        print(f"  {i:>2}  {n:<20} {'gesetzt' if n in keys['gesetzt'] else 'fehlt'}")
+    print("  oder einen anderen Namen eingeben; Enter: zurück")
+    try:
+        choice = input("Ihre Wahl: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if not choice:
+        return
+    name = names[int(choice) - 1] if choice.isdigit() and 1 <= int(choice) <= len(names) \
+        else choice.upper()
+    cmd_agenten_schluessel(plain(), [name])
+
+
 # --- menu on login ---------------------------------------------------------
 
 def menu_off_path():
@@ -2240,12 +3921,14 @@ clawbook - Menü
   7  {github_item}
   8  {login_item}
   9  NotebookLM-Anmeldung prüfen
+ 10  Agenten-Ausstattung (MCP-Server, Skills, Schlüssel)
   0  Beenden"""
 
 
 def plain(**kw):
     opts = {"json": False, "quiet": False, "private": False, "yes": False, "write": False,
-            "vor_wsm": False, "vorladen": False, "pruefen": False, "dienst": False}
+            "vor_wsm": False, "vorladen": False, "pruefen": False, "dienst": False,
+            "entfernen": False}
     opts.update(kw)
     return opts
 
@@ -2392,6 +4075,7 @@ def interactive():
         "7": menu_github,
         "8": lambda: set_menu_on_login(not menu_on_login()),
         "9": lambda: cmd_notebooklm(plain()),
+        "10": menu_agenten,
     }
     while True:
         print(MENU.format(
@@ -2426,7 +4110,8 @@ def interactive():
 
 FLAGS = {"--json": "json", "--quiet": "quiet", "-q": "quiet", "--private": "private",
          "--yes": "yes", "-y": "yes", "--write": "write", "--vor-wsm": "vor_wsm",
-         "--vorladen": "vorladen", "--pruefen": "pruefen", "--dienst": "dienst"}
+         "--vorladen": "vorladen", "--pruefen": "pruefen", "--dienst": "dienst",
+         "--entfernen": "entfernen"}
 
 
 def version_text():
@@ -2463,11 +4148,22 @@ def dispatch(words, opts):
         return cmd_notebooklm(opts)
     if cmd == "wsm":
         return cmd_wsm(opts, args)
+    if cmd == "agenten":
+        if os.geteuid() == 0:
+            # Agent configuration belongs to the working user: run as student.
+            sys.stdout.flush()
+            cmd = as_user_env([sys.executable, "-I", os.path.abspath(__file__)] + ARGV)
+            os.execvp(cmd[0], cmd)
+        return cmd_agenten(opts, args)
     raise CliError(f"Unbekannter Befehl: {' '.join(words)} (Hilfe: clawbook --help)",
                    code=2)
 
 
+ARGV = []
+
+
 def main(argv):
+    ARGV[:] = argv
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except (AttributeError, ValueError):

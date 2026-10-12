@@ -90,9 +90,11 @@ Hier nur, was bei den Zugängen dazukommt:
   Datei in Ihrem Home-Verzeichnis.
 - **MCP-Server** — ein Dienst, der einem Agenten
   zusätzliche Werkzeuge anbietet (im Wiki suchen,
-  Webseiten öffnen, Oberflächen entwerfen). Sie tragen
-  ihn einmal bei Claude Code ein, danach nutzt der
-  Agent ihn selbst.
+  Webseiten öffnen, Oberflächen entwerfen). Die
+  MCP-Server und Skills des Images trägt clawbook bei
+  allen Agenten selbst ein; für Stitch und Wiki.js
+  geben Sie nur einen Schlüssel ein. Siehe
+  [Agenten-Ausstattung](../agenten-ausstattung.md).
 - **tmux** — ein Programm, das mehrere
   Terminal-Sitzungen im Container am Leben hält, auch
   wenn Ihre Verbindung abbricht. `wsm` startet
@@ -208,9 +210,9 @@ allen Seiten dasselbe:
    Studierenden-Antrag ein paar Tage dauern kann.
    Stellen Sie ihn gleich am Anfang.
 2. **Ein Coding-Agent.** Im Kurs arbeiten wir vor
-   allem mit **Claude Code**; die Anleitungen zu den
-   MCP-Diensten (Stitch, Wiki.js, Playwright) sind
-   dafür geschrieben. Dafür brauchen Sie
+   allem mit **Claude Code**; die MCP-Dienste (Stitch,
+   Wiki.js, Playwright) richtet clawbook aber bei allen
+   Agenten ein. Für Claude Code brauchen Sie
    [Anthropic](anthropic.md). Wer erst einmal nichts
    ausgeben will, startet mit der Copilot CLI aus dem
    Student Developer Pack ([GitHub](github.md)) oder
@@ -225,9 +227,11 @@ allen Seiten dasselbe:
 5. **[Kurs-Dienste](kurs-dienste.md)** — sobald Sie
    Adresse und Schlüssel im Kurs bekommen haben.
 6. **[Ohne Account](ohne-account.md)** — Playwright
-   und Graphify als Werkzeuge für Claude Code
-   eintragen und `wsm` zum ersten Mal starten (nach
-   GitHub); das dauert ein paar Minuten.
+   und Graphify kennenlernen (eingetragen sind sie
+   schon, siehe
+   [Agenten-Ausstattung](../agenten-ausstattung.md))
+   und `wsm` zum ersten Mal starten (nach GitHub); das
+   dauert ein paar Minuten.
 
 ## Drei Regeln für Schlüssel und Zugänge
 
@@ -241,7 +245,13 @@ allen Seiten dasselbe:
    bekommen sollen. Besonders `ANTHROPIC_API_KEY`:
    Ist die Variable gesetzt, nimmt Claude Code den
    Schlüssel statt Ihres Abos und rechnet pro Token
-   ab (siehe [Anthropic](anthropic.md)).
+   ab (siehe [Anthropic](anthropic.md)). Einzige
+   Ausnahme: Schlüssel für MCP-Server (Stitch, Wiki.js)
+   speichert `clawbook agenten schluessel` in
+   `~/.clawbook/secrets`, und der Container setzt sie in
+   jedem Terminal — so finden alle Agenten sie. Schlüssel
+   für die Anmeldung der Agenten selbst nimmt dieser
+   Befehl nicht an.
 2. **Nie im Befehl tippen.** Alles, was Sie im
    Terminal eingeben, landet in der Befehlshistorie
    (`~/.bash_history`). Wo ein Schlüssel in einen
@@ -261,7 +271,8 @@ allen Seiten dasselbe:
    Zugängen — `~/.claude.json`,
    `~/.claude/.credentials.json`,
    `~/.codex/auth.json`, `~/.config/gh/`,
-   `~/.local/share/opencode/auth.json`, `~/.notebooklm/`
+   `~/.local/share/opencode/auth.json`, `~/.notebooklm/`,
+   `~/.clawbook/secrets`, `~/.gemini/config/mcp_config.json`
    — gehören nie in ein Repository (`git add` prüfen),
    nie in eine Hilfe-Anfrage, nie in einen Chat. Wer
    sie hat, arbeitet auf Ihre Rechnung. Und umgekehrt:
@@ -274,6 +285,7 @@ allen Seiten dasselbe:
 ```bash
 clawbook check          # sind alle Werkzeuge da?
 clawbook github status  # GitHub
+clawbook agenten        # MCP-Server, Skills, Schlüssel je Agent
 claude mcp list         # MCP-Dienste für Claude Code
 opencode auth list      # Anbieter in OpenCode
 ```
