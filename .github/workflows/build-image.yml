@@ -57,7 +57,8 @@ jobs:
         # The product must stand on its own: no decision or requirement
         # numbers from the maintainers' private notes.
         run: |
-          if git grep -nE '\b(DEC|REQ|REP|IDEA|BR|REC)-[0-9]{3}\b|\[\[' -- . ':!.github'; then
+          if git grep -nIE '\b(DEC|REQ|REP|IDEA|BR|REC)-[0-9]{3}\b' -- . ':!.github' \
+             || git grep -nF '[[' -- '*.md'; then
             echo "::error::internal references found"; exit 1
           fi
 
