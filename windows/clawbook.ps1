@@ -91,7 +91,11 @@ $LongWaitHint = 'Das kann einige Minuten dauern – bitte nicht abbrechen.'
 foreach ($d in @($AppDir, $LogDir, $UserDir, $ExchangeDir, $BackupDir, $SshDir)) {
   New-Item -ItemType Directory -Force -Path $d | Out-Null
 }
-$LogFile = Join-Path $LogDir ("clawbook-{0}.log" -f (Get-Date -Format 'yyyyMMdd'))
+# One log file per run (date and time in the name); keep the newest 30.
+$LogFile = Join-Path $LogDir ("clawbook-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmm'))
+Get-ChildItem -LiteralPath $LogDir -Filter 'clawbook-*.log' -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending | Select-Object -Skip 30 |
+  Remove-Item -Force -ErrorAction SilentlyContinue
 $Utf8NoBom = New-Object Text.UTF8Encoding $false
 $WslcPath = 'wslc'
 
@@ -290,14 +294,28 @@ function Wait-Ssh {
 function Invoke-Pull($Name) {
   # Registry connections from inside WSL sometimes time out on the first
   # attempt, so try a few times before giving up.
+  # The last attempt runs with captured output (dots instead of the
+  # progress bar), so the reason for the failure ends up in the log.
   $attempts = 3
+  $lastOut = ''
   for ($i = 1; $i -le $attempts; $i++) {
-    $code = Invoke-Visible $WslcPath @('pull', $Name)
+    if ($i -lt $attempts) {
+      $code = Invoke-Visible $WslcPath @('pull', $Name)
+    } else {
+      Say 'Letzter Versuch; die Meldungen von wslc landen dabei im Protokoll ...' 'Yellow'
+      $r = Invoke-WslcWithDots pull $Name
+      $code = $r.Code
+      $lastOut = $r.Out
+    }
     if ($code -eq 0) { return }
     if ($i -lt $attempts) {
       Say "Der Download hat nicht geklappt (Versuch $i von $attempts). Ich versuche es in 15 Sekunden erneut ..." 'Yellow'
       Start-Sleep -Seconds 15
     }
+  }
+  if ($lastOut) {
+    $tail = ($lastOut -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 5) -join "`n"
+    Write-Host ("Meldung von wslc:`n" + $tail) -ForegroundColor DarkGray
   }
   Say 'Mögliche Ursachen: keine Internetverbindung, ein aktives VPN, ein Proxy oder eine Firewall der Hochschule.' 'Yellow'
   Say 'Prüfen kannst du die Verbindung mit:  curl.exe -sI https://ghcr.io/v2/   (kommt eine Antwort wie „HTTP/1.1 401“ oder „405“, ist ghcr.io erreichbar).' 'Yellow'
