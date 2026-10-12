@@ -1,6 +1,6 @@
 # Wegweiser
 
-Stand: 2026-10-05
+Stand: 2026-10-12
 
 ## Was ist clawbook?
 
@@ -26,7 +26,12 @@ Datei auf einen anderen Rechner mitnehmen lässt.
    Anbietern anlegen und jedes Werkzeug im Container
    anmelden. Die Zugänge gehören dir und stecken nicht im
    Image.
-3. **[Pflege](pflege.md)** — täglich starten,
+3. **[Kurse und Technikpakete](kurse-und-pakete.md)** —
+   wenn deine Lehrveranstaltung weitere Werkzeuge
+   braucht (Java, .NET, Datenbanken, ESP32 …): Kurs
+   hinzufügen und je Kurs ein eigenes VS Code
+   einrichten.
+4. **[Pflege](pflege.md)** — täglich starten,
    aktualisieren, sichern und auf einen anderen Rechner
    umziehen.
 
@@ -96,6 +101,15 @@ erklärt das [Setup](setup/README.md).
   `home-<datum>.tar` unter
   `%USERPROFILE%\clawbook\sicherungen\`. Enthält Logins und
   Schlüssel; wie ein Passwort behandeln.
+- **Kurs, Technikpaket** — Zusatzwerkzeuge für eine
+  Lehrveranstaltung. Ein Technikpaket bringt eine Technik
+  mit (zum Beispiel Java), ein Kurs mehrere
+  Technikpakete auf einmal. Du installierst sie im
+  Container über das clawbook-Menü.
+- **VSCodePack** — ein eigenes, fertig eingerichtetes
+  VS Code unter Windows, das sich mit dem Container
+  verbindet; je Kurs eines, dazu das Grundpack
+  `clawbook`.
 - **wsm** — der WorkspaceManager, ein Befehl im Container,
   der Projektordner unter `~/source` anlegt und Agenten
   darin startet.

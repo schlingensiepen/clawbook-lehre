@@ -17,6 +17,13 @@ am besten vorgehen und was die wichtigsten Begriffe
 bedeuten. Die Einzelheiten stehen auf je einer Seite
 pro Anbieter.
 
+Werkzeuge für einzelne Lehrveranstaltungen — etwa Java,
+.NET, Datenbanken oder PlatformIO für den ESP32 — sind
+nicht von Anfang an im Image. Sie kommen mit einem
+**Kurs-Paket**, das Sie im Container hinzufügen; einen
+Account brauchen Sie dafür nicht. Wie das geht, steht in
+[Kurse und Technikpakete](../kurse-und-pakete.md).
+
 Die Webseiten der Anbieter ändern sich: Menüpfade und
 Bezeichnungen auf den Setup-Seiten gelten zum
 genannten Stand und können inzwischen etwas anders

@@ -7,8 +7,9 @@ Voraussetzung ist, dass die [Installation](installation.md)
 einmal durchgelaufen ist. Begriffe wie Container, Image und
 Volume erklärt der [Wegweiser](README.md#begriffe).
 Meldungen des Verwaltungs-Skripts stehen hier wörtlich in
-Anführungszeichen. Das Skript spricht Sie mit „du" an; so
-steht es auch in den Zitaten.
+Anführungszeichen. Das Skript spricht Sie meist noch mit
+„du" an, in neueren Meldungen mit „Sie"; so steht es
+auch in den Zitaten.
 
 Inhalt:
 
@@ -25,6 +26,9 @@ Inhalt:
 11. [Für Fortgeschrittene](#11-für-fortgeschrittene) — ohne
     Menü, andere Image-Version, Testmodus, Mutagen
 12. [Wenn etwas nicht geht](#wenn-etwas-nicht-geht)
+
+Kurse und Technikpakete (Menüpunkt [11]) haben eine
+eigene Seite: [Kurse und Technikpakete](kurse-und-pakete.md).
 
 Alles läuft über denselben Befehl wie bei der Installation.
 Er holt jedes Mal die aktuelle Fassung des
@@ -51,8 +55,9 @@ clawbook – was möchtest du tun?
   [6] Status anzeigen
   [7] anhalten
   [8] zurücksetzen (Home neu, vorher Sicherung)
-  [9] VS Code starten und verbinden (VSCodePack)
- [10] VSCodePack installieren oder aktualisieren
+  [9] VS Code starten
+ [10] VSCodePacks einrichten
+ [11] Kurse und Technikpakete
   [0] beenden
 Auswahl [1]
 ```
@@ -63,9 +68,11 @@ importieren** (ersetzt Ihr Home durch eine Sicherung).
 Das Skript fragt bei [4] nach, bevor es etwas ersetzt.
 
 Die Punkte [9] und [10] betreffen das eigene VS Code für
-clawbook, das VSCodePack; die
+clawbook, die VSCodePacks; die
 [Installation](installation.md), Abschnitt 5, erklärt
-beide ausführlich.
+beide ausführlich. Punkt [11] öffnet das Menü für Kurse
+und Technikpakete im Container; das beschreibt
+[Kurse und Technikpakete](kurse-und-pakete.md).
 
 ## 1. Täglich starten
 
@@ -81,10 +88,18 @@ beide ausführlich.
    /v:localhost:3390` für den Bildschirm.
 
 Für VS Code geht es noch kürzer: Menüpunkt **[9] VS Code
-starten und verbinden (VSCodePack)** startet den Container,
-falls nötig, und öffnet dann VS Code. Ohne PowerShell
-erledigt dasselbe der Eintrag **„clawbook VS Code"** im
-Startmenü.
+starten** startet den Container, falls nötig, und öffnet
+dann VS Code; bei mehreren VSCodePacks fragt er vorher,
+welches. Ohne PowerShell erledigt dasselbe der Eintrag
+**„clawbook VS Code"** im Startmenü (bei Kursen
+„clawbook VS Code – <Titel des Kurses>").
+
+Haben Sie im Container einen Kurs hinzugefügt oder
+entfernt, gleicht **[1]** danach die VSCodePacks ab: Es
+fragt, ob es ein fehlendes einrichten oder ein
+überzähliges entfernen soll (siehe
+[Kurse und Technikpakete](kurse-und-pakete.md),
+Abschnitte 3 und 5).
 
 **Nach dem Abmelden oder einem Neustart von Windows läuft
 der Container nicht mehr** — WSL kann Container nicht von
@@ -136,11 +151,34 @@ aktualisieren**. Das Skript zeigt seine Schritte als
    Fenster offen lassen.
 2. Lief der Container, speichert es zuerst den Stand des
    Containers in Ihr Home — welche Image-Version und
-   welche Pakete installiert sind — und meldet „Stand
-   gespeichert (~/.clawbook/stand.json im Home)." Dann
-   hält es den Container an und entfernt ihn.
+   welche Kurse und Technikpakete installiert sind — und
+   meldet „Stand gespeichert (~/.clawbook/stand.json im
+   Home)." Dann hält es den Container an und entfernt
+   ihn.
 3. Es legt den Container mit dem neuen Image neu an.
 4. Es richtet SSH neu ein und zeigt den grünen Kasten.
+
+**Danach kommen Ihre Kurse zurück.** Kurse und
+Technikpakete liegen im Container, nicht im Home; der
+neue Container hat sie zunächst nicht. Er spielt sie
+deshalb nach dem Start **im Hintergrund** wieder ein,
+nach dem gespeicherten Stand. Die Pakete kommen dabei
+aus dem Paket-Cache in Ihrem Home; liegen dort alle,
+geht das auch ohne Internet. Sie können sich
+währenddessen schon mit `ssh clawbook` anmelden; bis die
+Wiederherstellung fertig ist, fehlen im Container nur
+noch die Werkzeuge der Kurse.
+
+**[9] VS Code starten** und **[10]** warten darauf
+höchstens 10 Minuten: „Im Container werden gerade die
+Kurse und Technikpakete wiederhergestellt (nach einer
+Aktualisierung oder einem Import). Ich warte, bis das
+fertig ist – höchstens 10 Minuten." Eine beliebige Taste
+bricht das Warten ab. Ist alles da, meldet das Skript
+„Die Kurse und Technikpakete sind wiederhergestellt."
+Einzelheiten und was bei einem Fehler zu tun ist, stehen
+in [Kurse und Technikpakete](kurse-und-pakete.md),
+Abschnitt 7.
 
 **Ihr Home bleibt dabei erhalten.** Grund: Die Werkzeuge
 liegen im Image außerhalb von `/home/student`; Ihre
@@ -150,17 +188,21 @@ ausgetauscht, das Volume wird unverändert wieder
 eingehängt. Ihr SSH-Schlüssel bleibt derselbe; VS Code und
 GitHub kennen ihn weiter.
 
-Was **nicht** erhalten bleibt: alles, was Sie außerhalb
-des Home-Verzeichnisses installiert haben (zum Beispiel mit
-`sudo apt install`). Installieren Sie eigene Pakete
-deshalb in Ihr Home oder in Projekt-Umgebungen:
+Was **nicht** erhalten bleibt: alles, was Sie selbst
+außerhalb des Home-Verzeichnisses installiert haben (zum
+Beispiel mit `sudo apt install`). Nur Kurse und
+Technikpakete aus dem clawbook-Menü stellt clawbook
+wieder her. Installieren Sie eigene Pakete deshalb in
+Ihr Home oder in Projekt-Umgebungen:
 Python-Pakete in eine virtuelle Umgebung im Projekt
 (`uv venv`), Node-Pakete mit `npm install` im
 Projektordner.
 
-Das VS Code aus dem VSCodePack aktualisiert Menüpunkt [2]
-nicht mit; dafür gibt es **[10]** (siehe
-[Installation](installation.md), Abschnitt 5).
+Die VSCodePacks aktualisiert Menüpunkt [2] nicht mit;
+dafür gibt es **[10]**, dann **[1]** (siehe
+[Installation](installation.md), Abschnitt 5). Fehlen
+nach einer Aktualisierung Erweiterungen in VS Code,
+hilft derselbe Weg.
 
 ## 4. Wo Ihre Daten liegen
 
@@ -195,17 +237,26 @@ Zugriff auf Ihre Dateien von Windows aus haben Sie über
 einzelne Dateien und — als Zusatz — über Mutagen
 (Abschnitt 11).
 
-Nicht im Home-Volume liegt das VSCodePack: Es liegt unter
-Windows in `%LOCALAPPDATA%\clawbook\vscode\` und gehört
-deshalb auch nicht zur Sicherung.
+Ebenfalls im Home liegen der **Stand**
+(`~/.clawbook/stand.json`: welche Kurse und
+Technikpakete installiert sind) und der **Paket-Cache**
+(`~/.clawbook/apt`: die heruntergeladenen Pakete dieser
+Kurse). Beides braucht clawbook, um Ihre Kurse nach
+einer Aktualisierung oder einem Import wieder
+einzuspielen (Abschnitt 3).
+
+Nicht im Home-Volume liegen die VSCodePacks: Sie liegen
+unter Windows in `%LOCALAPPDATA%\clawbook\vscode\` (je
+VSCodePack ein Unterordner) und gehören deshalb auch
+nicht zur Sicherung.
 
 ## 5. Sicherung schreiben („mitnehmen")
 
 Menüpunkt **[3] mitnehmen: Home als Sicherung speichern**:
 
 1. Lief der Container, speichert das Skript zuerst den
-   Stand des Containers (Image-Version, Pakete) in Ihr
-   Home und meldet „Stand gespeichert
+   Stand des Containers (Image-Version, Kurse und
+   Technikpakete) in Ihr Home und meldet „Stand gespeichert
    (~/.clawbook/stand.json im Home)." So weiß die
    Sicherung später, aus welchem Stand sie stammt
    (Abschnitt 6).
@@ -232,6 +283,18 @@ Menüpunkt **[3] mitnehmen: Home als Sicherung speichern**:
 Ein `.tar` ist ein Archiv, das Dateien samt ihren
 Linux-Rechten enthält — deshalb dieses Format und nicht
 ein einfaches Kopieren.
+
+**Kurse machen die Sicherung größer.** Die Sicherung
+enthält Ihr ganzes Home, also auch den Paket-Cache
+(Abschnitt 4). Je installiertem Kurs kommt etwa die
+Größe seines Downloads dazu: rund 0,8 GB für
+`kurs-inf`, 1,7 GB für `kurs-swe`, 0,35 GB für
+`kurs-iot` — und noch einmal etwa 6 GB, wenn Sie für
+`kurs-iot` PlatformIO vorgeladen haben (`~/.platformio`).
+Dafür kommen Ihre Kurse nach einem Import auf einem
+anderen Rechner auch ohne Internet zurück. Wie viel der
+Paket-Cache gerade belegt, zeigt im Container
+`clawbook status` (Abschnitt 10).
 
 **Die Sicherung enthält Ihre Anmeldungen bei allen
 Werkzeugen und Ihren privaten SSH-Schlüssel.** Wer die
@@ -289,17 +352,19 @@ Alternative für später.
    Stand der Sicherung:
      Datum:    12.10.2026 14:30
      Build:    <Commit-Kennung des Images>
-     Kennung:  clawbook
-     Pakete:   keine
+     Kurse:    kurs-inf
+     Pakete:   clawbook-db-sqlite 0.8.0-1, clawbook-java 0.8.0-1, …
    ```
 
    „Datum" ist der Zeitpunkt der Sicherung, „Build" das
-   Image, mit dem sie entstand, „Kennung" der Kurs (bei
-   `clawbook`: kein besonderer Kurs), „Pakete" die
-   installierten Zusatzpakete. So erkennen Sie, ob Sie
-   die richtige Datei gewählt haben. Ältere Sicherungen
-   haben diese Angaben noch nicht; dann fehlt der Block,
-   und der Import läuft trotzdem.
+   Image, mit dem sie entstand, „Kurse" die installierten
+   Kurse, „Pakete" alle Kurse und Technikpakete mit
+   Version. So erkennen Sie, ob Sie die richtige Datei
+   gewählt haben. Sicherungen aus früheren Versionen
+   zeigen statt „Kurse" die Zeile „Kennung" (`clawbook`
+   heißt: kein Kurs); noch ältere haben diese Angaben gar
+   nicht. Dann fehlt der Block, und der Import läuft
+   trotzdem.
 6. Warten. Das Skript lädt das Image, legt ein neues
    Volume an, entpackt die Sicherung hinein (alle fünf
    Sekunden ein Punkt), startet den Container und richtet
@@ -309,9 +374,13 @@ Alternative für später.
 
 Danach ist alles wie auf dem alten Rechner: Projekte,
 Anmeldungen (auch bei GitHub), Einstellungen im Container.
-Nur das VSCodePack liegt unter Windows und reist nicht
-mit: Wählen Sie auf dem neuen Rechner einmal **[9]**; das
-Skript bietet dann die Installation an.
+Ihre Kurse spielt der Container nach dem Import im
+Hintergrund wieder ein, wie nach einer Aktualisierung
+(Abschnitt 3). Nur die VSCodePacks liegen unter Windows
+und reisen nicht mit: Wählen Sie auf dem neuen Rechner
+einmal **[10]** und dann **[1]**; das Skript richtet das
+Grundpack und je Kurs ein VSCodePack ein. Es wartet
+vorher, bis die Kurse wieder da sind.
 
 ## 7. Importieren, wenn schon ein Home da ist
 
@@ -353,6 +422,13 @@ SSH-Schlüssel (das Skript ersetzt den Schlüssel unter
 Windows gleich mit). Es fragt zur Sicherheit „Wirklich
 zurücksetzen? Zum Bestätigen ‚ja' eingeben" und schreibt
 vorher eine Sicherung.
+
+Auch Ihre Kurse sind danach nicht mehr installiert;
+fügen Sie sie bei Bedarf mit **[11]** wieder hinzu
+([Kurse und Technikpakete](kurse-und-pakete.md)). Die
+VSCodePacks unter Windows bleiben; zu Kursen, die im
+Container fehlen, fragt das Skript beim nächsten [1]
+oder [9], ob es sie entfernen soll.
 
 Nach dem Zurücksetzen gehen Sie das [Setup](setup/README.md)
 der Werkzeuge erneut durch — oder Sie importieren später
@@ -402,9 +478,10 @@ die Sicherungen, der Schlüssel, das VSCodePack). Deshalb:
 3. **Löschen Sie alte Sicherungen** im Profil regelmäßig
    (Abschnitt 5) und bewahren Sie den Stick sicher auf —
    er enthält Ihre Logins.
-4. **Fehlt das VSCodePack** nach einem Zurücksetzen des
-   Rechners, richtet [9] es wieder ein (Download etwa
-   150 MB, entpackt etwa 1 GB).
+4. **Fehlen die VSCodePacks** nach einem Zurücksetzen
+   des Rechners, richtet [10] mit [1] sie wieder ein
+   (Download einmal etwa 150 MB, entpackt etwa 1 GB je
+   VSCodePack).
 5. **Bildschirm (Remotedesktop)** nur auf Rechnern nutzen,
    an denen nicht gleichzeitig andere angemeldet sind
    (siehe [Installation](installation.md), Abschnitt 6).
@@ -427,9 +504,8 @@ wieder das Menü. Die Zeilen bedeuten:
 | „Schnittstelle:" | Version der Verbindung zwischen Skript und Container (nur bei laufendem Container) |
 | „Build:" | Kennung und Datum des Images; daran erkennt die Betreuung die Image-Version (nur bei laufendem Container) |
 | „Sicherungen:" | Anzahl und Größe Ihrer Sicherungen |
-| „VSCodePack:" | Kennung des VSCodePacks (`clawbook`, wenn kein Kurs gewählt ist) |
-| „VS Code im Pack:" | installierte VS-Code-Version oder „noch nicht installiert (Menüpunkt [10])" |
-| „Neuestes VS Code:" | neueste Version bei Microsoft, mit „– aktualisieren mit Menüpunkt [10]", wenn Ihre älter ist |
+| „VSCodePacks:" | je VSCodePack eine Zeile mit Kennung, Titel und VS-Code-Version, zum Beispiel `clawbook  clawbook (ohne Kurs) (VS Code …)`; „keine (Menüpunkt [10])", wenn noch keines eingerichtet ist |
+| „Neuestes VS Code:" | neueste Version bei Microsoft, mit „– aktualisieren mit Menüpunkt [10]", wenn eines Ihrer VSCodePacks älter ist |
 
 Steht bei „Schnittstelle:" „keine (älteres Image –
 aktualisieren mit Menüpunkt [2])", ist das Image älter als
@@ -440,6 +516,20 @@ dieses Skript. Aktualisiere es mit Menüpunkt [2]."
 
 Die Zeile „Neuestes VS Code:" fehlt, wenn Microsoft nicht
 schnell genug antwortet; das ist kein Fehler.
+
+**Status im Container.** Was im Container selbst los
+ist, zeigt dort `clawbook status` (oder Punkt 1 im
+clawbook-Menü nach `ssh clawbook`). Für Kurse und
+Technikpakete sind zwei Zeilen wichtig:
+
+| Zeile | Bedeutung |
+|---|---|
+| „Paket-Cache:" | wie viel Platz die aufbewahrten Pakete im Home belegen und wo (`/home/student/.clawbook/apt/archives`), dazu die Größe der Paketlisten |
+| „Wiederherstellung:" | „nicht nötig", „läuft", „fertig" oder „FEHLER", jeweils mit den Paketnamen; bei „läuft" der Pfad des Protokolls („Fortschritt: …"), bei „FEHLER" der Grund und „erneut versuchen: clawbook wiederherstellen" |
+
+Was bei „FEHLER" zu tun ist, steht in
+[Kurse und Technikpakete](kurse-und-pakete.md), „Wenn
+etwas nicht geht".
 
 **[5] SSH für VS Code neu einrichten** holt den Schlüssel
 frisch aus dem Container und schreibt
@@ -477,12 +567,20 @@ irm https://raw.githubusercontent.com/schlingensiepen/clawbook-lehre/main/get-cl
 
 Mögliche Werte: `start`, `update`, `export` (Sicherung
 schreiben), `import`, `ssh`, `status`, `stop`, `reset`,
-`vscode` (wie Menüpunkt [9]) und `vscode-install` (wie
-Menüpunkt [10]). `import` und `reset` fragen auch so nach,
-bevor sie etwas ersetzen. Entfernen Sie die Variable
-wieder mit `Remove-Item Env:CLAWBOOK_ACTION`, sonst führt
-jeder weitere Aufruf in diesem Fenster dieselbe Aktion
-aus.
+`vscode` (wie Menüpunkt [9]), `vscode-install` (wie
+Menüpunkt [10], Punkt [1]) und `pakete` (wie Menüpunkt
+[11]). `import` und `reset` fragen auch so nach, bevor
+sie etwas ersetzen. Entfernen Sie die Variable wieder mit
+`Remove-Item Env:CLAWBOOK_ACTION`, sonst führt jeder
+weitere Aufruf in diesem Fenster dieselbe Aktion aus.
+
+Bei `vscode` und `vscode-install` wählt die Variable
+`CLAWBOOK_KURS` ein bestimmtes VSCodePack, zum Beispiel
+`$env:CLAWBOOK_KURS = 'kurs-inf'` (`clawbook` ist das
+Grundpack). Ohne sie fragt `vscode` bei mehreren
+VSCodePacks nach, und `vscode-install` richtet alle
+passend zum Container ein. Auch sie gilt, bis Sie sie mit
+`Remove-Item Env:CLAWBOOK_KURS` entfernen.
 
 Um bei `export` oder `import` eine Datei anzugeben
 (`-File`), starten Sie die gespeicherte Fassung des
@@ -619,7 +717,18 @@ Zurücksetzen die Synchronisation beenden und neu anlegen.
   Ihrer Lehrveranstaltung. Bis es ein korrigiertes Image
   gibt, hilft eine ältere Version (Abschnitt 11). Eigene
   Installationen außerhalb des Homes sind nach einer
-  Aktualisierung weg (Abschnitt 3).
+  Aktualisierung weg (Abschnitt 3). Fehlt ein Werkzeug
+  eines Kurses, läuft vielleicht noch die
+  Wiederherstellung: `clawbook status`, Zeile
+  „Wiederherstellung:" (Abschnitt 10).
+- **„Hinweis: Die Wiederherstellung der Kurse und
+  Technikpakete im Container ist fehlgeschlagen. Prüfen
+  Sie sie mit Menüpunkt [11]."** — siehe
+  [Kurse und Technikpakete](kurse-und-pakete.md), „Wenn
+  etwas nicht geht".
+- **Die Sicherung ist viel größer als erwartet** — Kurse
+  und eine vorgeladene PlatformIO-Plattform liegen mit im
+  Home (Abschnitt 5).
 - **„Der Container braucht länger als sonst …"** — eine
   Minute warten, Befehl erneut, Enter. Mehr dazu in der
   [Installation](installation.md), „Wenn etwas nicht

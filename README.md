@@ -43,6 +43,10 @@ verbindest, steht in der [Installation](docs/installation.md).
   Bildschirm
 - [Setup](docs/setup/README.md) — Accounts je Anbieter
   anlegen und die Werkzeuge im Container anmelden
+- [Kurse und Technikpakete](docs/kurse-und-pakete.md) —
+  Werkzeuge für eine Lehrveranstaltung hinzufügen
+  (Java, .NET, Datenbanken, ESP32 …) und je Kurs ein
+  eigenes VS Code einrichten
 - [Pflege](docs/pflege.md) — täglich starten,
   aktualisieren, sichern, auf einen anderen Rechner
   umziehen
@@ -89,7 +93,8 @@ mitarbeiten; Studierende brauchen ihn nicht.
 - `windows/clawbook.ps1` — das Verwaltungs-Skript: Menü
   und Aktionen (starten, aktualisieren, mitnehmen,
   importieren, SSH einrichten, Status, anhalten,
-  zurücksetzen) über WSLC, dazu das VSCodePack
+  zurücksetzen) über WSLC, dazu die VSCodePacks (je Kurs
+  eines) und der Aufruf des Kurs-Menüs im Container
 - `deploy/Containerfile` — Bauanleitung des Images
 - `deploy/versions.env` — festgelegte Versionen aller
   Werkzeuge; ein wöchentlicher Workflow meldet neuere
@@ -97,8 +102,11 @@ mitarbeiten; Studierende brauchen ihn nicht.
   werden: Start-Schritt (`etc/cont-init.d`), Dienste
   SSH, Bildschirm (Weston-RDP) und Samba
   (`etc/services.d`, gestartet von s6-overlay),
-  Befehl `clawbook` (Menü, GitHub-Anmeldung, Prüfung;
-  `clawbook-check` als kurzer Aufruf), Voreinstellungen
+  Befehl `clawbook` (Menü, GitHub-Anmeldung, Prüfung,
+  Kurse und Technikpakete, Wiederherstellung nach einem
+  neuen Image; `clawbook-check` als kurzer Aufruf),
+  Paketquelle und Paket-Cache im Home (`etc/apt`),
+  Voreinstellungen
 - `deploy/smoke-test.sh`, `deploy/check-versions.sh` —
   Rauchtest des gebauten Images und Versions-Bericht
 - `.github/workflows/` — Bau mit Lint und Rauchtest,
@@ -106,6 +114,20 @@ mitarbeiten; Studierende brauchen ihn nicht.
 - `docs/` — die Anleitungen; der Anhang der
   [Installation](docs/installation.md) beschreibt einen
   Ausweichweg mit podman in einer WSL-Distribution
+
+### Paket-Repository clawbook-apt
+
+Kurse und Technikpakete sind Debian-Pakete und liegen
+nicht in diesem Repository, sondern im signierten
+apt-Repository
+[clawbook-apt](https://github.com/schlingensiepen/clawbook-apt)
+(veröffentlicht unter
+<https://schlingensiepen.github.io/clawbook-apt/>). Das
+Image kennt die Quelle und vertraut nur ihrem Schlüssel
+(`deploy/rootfs/etc/apt/sources.list.d/clawbook.sources`,
+`deploy/rootfs/usr/share/keyrings/`). Ein neuer Kurs oder
+ein neues Technikpaket entsteht dort per Pull Request;
+wie, beschreibt die README von clawbook-apt.
 
 ### Selbst bauen
 

@@ -21,8 +21,9 @@ Schreibweise in dieser Anleitung: Pfade wie
 des Windows-Explorers einfügen. In PowerShell heißt
 dasselbe `$env:USERPROFILE`. Meldungen des
 Verwaltungs-Skripts stehen hier wörtlich in
-Anführungszeichen. Das Skript spricht Sie mit „du" an; so
-steht es auch in den Zitaten.
+Anführungszeichen. Das Skript spricht Sie meist noch mit
+„du" an, in neueren Meldungen mit „Sie"; so steht es
+auch in den Zitaten.
 
 ## 1. Voraussetzungen
 
@@ -287,10 +288,10 @@ drei Schritte ausführlich. Danach endet das Skript.
 
 ### Das Menü ab dem zweiten Aufruf
 
-Die Menüpunkte [9] und [10] für VS Code gibt es erst, wenn
-der erste Start aus diesem Abschnitt einmal durchgelaufen
-ist (das Home-Volume also vorhanden ist). Ab dann zeigt
-der Befehl aus Abschnitt 2 das vollständige Menü:
+Die Menüpunkte [9] bis [11] gibt es erst, wenn der erste
+Start aus diesem Abschnitt einmal durchgelaufen ist (das
+Home-Volume also vorhanden ist). Ab dann zeigt der Befehl
+aus Abschnitt 2 das vollständige Menü:
 
 ```text
 clawbook – was möchtest du tun?
@@ -303,15 +304,18 @@ clawbook – was möchtest du tun?
   [6] Status anzeigen
   [7] anhalten
   [8] zurücksetzen (Home neu, vorher Sicherung)
-  [9] VS Code starten und verbinden (VSCodePack)
- [10] VSCodePack installieren oder aktualisieren
+  [9] VS Code starten
+ [10] VSCodePacks einrichten
+ [11] Kurse und Technikpakete
   [0] beenden
 Auswahl [1]
 ```
 
 Für die Installation brauchen Sie daraus nur Punkt [9]
-(Abschnitt 5); alles andere erklärt die
-[Pflege-Anleitung](pflege.md).
+(Abschnitt 5). Punkt [11] fügt Werkzeuge für eine
+Lehrveranstaltung hinzu; das erklärt
+[Kurse und Technikpakete](kurse-und-pakete.md). Alles
+andere steht in der [Pflege-Anleitung](pflege.md).
 
 ### Was das Skript auf Ihrem Rechner eingerichtet hat
 
@@ -390,7 +394,7 @@ clawbook - Menü
   3  Schlüssel anzeigen
   4  Stand anzeigen
   5  Stand schreiben (~/.clawbook/stand.json)
-  6  Pakete und Kurse (noch nicht verfügbar)
+  6  Pakete und Kurse
   7  GitHub-Anmeldung prüfen
   8  Menü beim Anmelden per SSH nicht mehr zeigen
   0  Beenden
@@ -437,6 +441,14 @@ Nutzungsdaten an Microsoft (Telemetrie aus). Ein
 VS Code, das Sie vielleicht schon haben, bleibt
 unberührt.
 
+Zunächst gibt es ein VSCodePack, das Grundpack
+`clawbook`. Fügen Sie später einen Kurs hinzu, bekommt
+jeder Kurs ein eigenes VSCodePack mit seinen
+Erweiterungen; alle verbinden sich mit demselben
+Container. Das erklärt
+[Kurse und Technikpakete](kurse-und-pakete.md). Für die
+Installation genügt das Grundpack.
+
 Zur Lizenz: VS Code ist kostenlos, aber Microsoft gibt
 es unter eigenen Bedingungen heraus. Deshalb verteilt
 das Projekt VS Code nicht selbst — das Skript lädt es
@@ -458,10 +470,9 @@ PowerShell-Fenster so lange offen.
 
 1. Den Befehl aus Abschnitt 2 erneut ausführen
    (Pfeiltaste nach oben, Enter) und im Menü `9`
-   eingeben: **[9] VS Code starten und verbinden
-   (VSCodePack)**. Läuft der Container nicht, startet das
-   Skript ihn zuerst („Der Container läuft nicht – ich
-   starte ihn zuerst.").
+   eingeben: **[9] VS Code starten**. Läuft der
+   Container nicht, startet das Skript ihn zuerst („Der
+   Container läuft nicht – ich starte ihn zuerst.").
 2. Beim ersten Mal meldet das Skript „Das VSCodePack (ein
    eigenes VS Code für clawbook) ist noch nicht
    installiert." und fragt „Jetzt installieren? Dafür
@@ -520,27 +531,57 @@ nächsten Mal genügt wieder Menüpunkt [9] — oder, ohne
 PowerShell, der Eintrag **„clawbook VS Code"** im
 Startmenü: Er startet den Container und dann VS Code.
 
-### Vorbereiten oder aktualisieren: Menüpunkt [10]
+Haben Sie später mehrere VSCodePacks (je Kurs eines),
+fragt [9] „Welches VS Code möchten Sie starten?" und
+schlägt das zuletzt gestartete vor; Enter übernimmt den
+Vorschlag. Im Startmenü hat dann jedes VSCodePack einen
+eigenen Eintrag „clawbook VS Code – <Titel des Kurses>".
+Nach einer Aktualisierung des Images wartet [9]
+außerdem, bis die Kurse im Container wiederhergestellt
+sind (höchstens 10 Minuten). Beides beschreibt
+[Kurse und Technikpakete](kurse-und-pakete.md).
 
-**[10] VSCodePack installieren oder aktualisieren** macht
-dieselbe Einrichtung wie Schritt 2 oben, nur ohne den
-Container — zum Beispiel, um VS Code schon vorzubereiten,
-während das Image noch lädt, oder um später eine neue
-Version zu holen. Am Ende fragt das Skript „VS Code jetzt
-starten und mit clawbook verbinden? [J/n]"; Enter startet
-VS Code wie bei [9].
+### Einrichten, aktualisieren, entfernen: Menüpunkt [10]
+
+**[10] VSCodePacks einrichten** öffnet ein Untermenü:
+
+```text
+VSCodePacks – was möchten Sie tun?
+  [1] alle passend zum Container einrichten oder aktualisieren (Vorgabe)
+  [2] ein einzelnes VSCodePack einrichten oder aktualisieren
+  [3] ein VSCodePack entfernen
+  [0] zurück
+Auswahl [1]
+```
+
+- **[1]** (Enter) richtet das Grundpack und je Kurs im
+  Container ein VSCodePack ein oder bringt vorhandene auf
+  den neuesten Stand — dieselben Schritte wie Schritt 2
+  oben. Die Kursangaben kommen aus dem Container; ein
+  angehaltener Container wird dafür gestartet. Am Ende
+  meldet das Skript „… von … VSCodePacks sind bereit."
+  und fragt „VS Code jetzt starten und mit clawbook
+  verbinden? [J/n]"; Enter startet VS Code wie bei [9].
+- **[2]** zeigt eine Liste („Welches VSCodePack möchten
+  Sie einrichten oder aktualisieren?") und richtet nur
+  das gewählte ein.
+- **[3]** entfernt ein VSCodePack samt seinen
+  Erweiterungen, Einstellungen und seinem
+  Startmenü-Eintrag. Das Skript fragt vorher nach; nur
+  `j` entfernt es.
+- **[0]** führt zurück ins Hauptmenü.
 
 Das VS Code aus dem VSCodePack aktualisiert sich nicht von
-selbst. Wählen Sie dafür gelegentlich wieder [10] — etwa,
-wenn **[6] Status anzeigen** die Zeile „Neuestes VS Code:
-… – aktualisieren mit Menüpunkt [10]" zeigt. Schließen Sie
-vorher alle VS-Code-Fenster. Das Skript lädt die neue
-Version, Ihre Erweiterungen und Einstellungen ziehen um
-(„Deine Erweiterungen und Einstellungen sind in die neue
-Version umgezogen."), und die vorige Version bleibt als
-Rückfall liegen; ältere räumt das Skript weg. Ist die
-installierte Version schon die neueste, gleicht [10] nur
-Erweiterungen und Einstellungen ab.
+selbst. Wählen Sie dafür gelegentlich [10] und dann [1] —
+etwa, wenn **[6] Status anzeigen** die Zeile „Neuestes
+VS Code: … – aktualisieren mit Menüpunkt [10]" zeigt.
+Schließen Sie vorher alle VS-Code-Fenster. Das Skript lädt
+die neue Version, Ihre Erweiterungen und Einstellungen
+ziehen um („Deine Erweiterungen und Einstellungen sind in
+die neue Version umgezogen."), und die vorige Version
+bleibt als Rückfall liegen; ältere räumt das Skript weg.
+Ist die installierte Version schon die neueste, gleicht
+[10] nur Erweiterungen und Einstellungen ab.
 
 ### Ausweichweg: VS Code selbst installieren
 
@@ -595,10 +636,13 @@ Mal reichen Schritt 3 und „Datei → Zuletzt verwendet
 öffnen (Open Recent)". Denken Sie daran, den Container
 vorher zu starten (Befehl aus Abschnitt 2, Enter).
 
-Sieht Ihr Kurs weitere Erweiterungen vor (zum Beispiel
-für Java), nennt sie die Anleitung Ihres Kurses. Mit dem
-VSCodePack kommen sie automatisch; auf diesem Ausweichweg
-installieren Sie sie selbst.
+Haben Sie einen Kurs installiert, der weitere
+Erweiterungen vorsieht (zum Beispiel für Java), kommen
+sie mit dem VSCodePack des Kurses automatisch; auf diesem
+Ausweichweg installieren Sie sie selbst. Welche
+Werkzeuge ein Kurs mitbringt, steht in
+[Kurse und Technikpakete](kurse-und-pakete.md),
+Abschnitt 8.
 
 ## 6. Den Bildschirm des Containers sehen
 
@@ -678,8 +722,9 @@ Zusatz öffnet er das Menü aus Abschnitt 4 (bei
   im Container installiert ist; das Verwaltungs-Skript
   speichert diesen Stand beim Sichern selbst (siehe
   [Pflege](pflege.md)).
-- **6 Pakete und Kurse** — kommt mit einer späteren
-  Version.
+- **6 Pakete und Kurse** — Werkzeuge für eine
+  Lehrveranstaltung hinzufügen oder entfernen, siehe
+  [Kurse und Technikpakete](kurse-und-pakete.md).
 - **7 GitHub anmelden** bzw. **GitHub-Anmeldung
   prüfen** — je nachdem, ob Sie schon angemeldet sind.
 - **8** — das Menü beim Anmelden per SSH ab- oder
