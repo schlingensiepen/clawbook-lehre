@@ -146,7 +146,10 @@ dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /nores
 ```
 
 Danach **Windows neu starten** und den Befehl aus
-Abschnitt 2 erneut ausführen. Nach einer frischen
+Abschnitt 2 erneut ausführen. Meldet `dism`, dass das
+Feature schon eingeschaltet ist, prüfen Sie, ob die
+Virtualisierung im BIOS/UEFI eingeschaltet ist (siehe
+unten). Nach einer frischen
 Installation mit `wsl --install` (Schritt 1) ist das
 Feature bereits eingeschaltet.
 
@@ -747,8 +750,10 @@ lesen können.
   Windows-Feature „VirtualMachinePlatform" fehlt.
   Einschalten als Administrator mit
   `dism.exe /online /enable-feature /featurename:VirtualMachinePlatform /all /norestart`,
-  dann Windows neu starten; Einzelheiten in Abschnitt 1,
-  „WSL zu Hause installieren".
+  dann Windows neu starten. Ist das Feature schon
+  eingeschaltet, prüfen Sie, ob die Virtualisierung im
+  BIOS/UEFI eingeschaltet ist. Einzelheiten in
+  Abschnitt 1, „WSL zu Hause installieren".
 - **„Deine WSL-Version ist zu alt: wslc …, nötig ist
   mindestens 3.0.1."** — das Skript fragt „Jetzt mit
   ‚wsl --update' aktualisieren? Das geht ohne

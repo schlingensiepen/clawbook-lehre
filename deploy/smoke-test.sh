@@ -214,21 +214,25 @@ echo "rdp ok"
 # stdio, and the Python Playwright of notebooklm (headless and on :0).
 # shellcheck disable=SC2016 # expands on the container side
 ssh_run 'set -e; d=$(mktemp -d); cd "$d"
-  timeout 120 playwright-cli install --skills >/dev/null
+  # "open" starts a background daemon: its output goes to a file (the ssh
+  # channel must not stay open), and every exit closes all its browsers.
+  trap '"'"'rc=$?; [ $rc = 0 ] || cat "$d/cli.log" 2>/dev/null
+    timeout 30 playwright-cli close-all >/dev/null 2>&1; cd /; rm -rf "$d"; exit $rc'"'"' EXIT
+  timeout 120 playwright-cli install --skills >>"$d/cli.log" 2>&1
   test -f .claude/skills/playwright-cli/SKILL.md
-  timeout 90 playwright-cli open "data:text/html,<title>cli-smoke</title>ok" >/dev/null
-  timeout 30 playwright-cli eval document.title | grep -q cli-smoke
-  timeout 30 playwright-cli close >/dev/null
-  timeout 90 playwright-cli open --headed "data:text/html,<title>cli-headed</title>ok" >/dev/null
-  timeout 30 playwright-cli eval document.title | grep -q cli-headed
-  timeout 30 playwright-cli close >/dev/null
-  cd / && rm -rf "$d"' || fail "playwright-cli could not open a page as student"
+  timeout 90 playwright-cli open "data:text/html,<title>cli-smoke</title>ok" >>"$d/cli.log" 2>&1 </dev/null
+  timeout 30 playwright-cli eval document.title 2>>"$d/cli.log" | grep -q cli-smoke
+  timeout 30 playwright-cli close >>"$d/cli.log" 2>&1
+  timeout 90 playwright-cli open --headed "data:text/html,<title>cli-headed</title>ok" >>"$d/cli.log" 2>&1 </dev/null
+  timeout 30 playwright-cli eval document.title 2>>"$d/cli.log" | grep -q cli-headed
+  timeout 30 playwright-cli close >>"$d/cli.log" 2>&1' || fail "playwright-cli could not open a page as student"
 echo "playwright-cli ok"
 # shellcheck disable=SC2016 # expands on the container side
 ssh_run 'cd "$(mktemp -d)" && timeout 120 python3 -' <<'PY' || fail "Playwright-MCP could not open a page"
-import json, subprocess, sys
+import json, os, signal, subprocess, sys
 p = subprocess.Popen(["playwright-mcp", "--headless", "--isolated"],
-                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+                     start_new_session=True)
 def call(i, method, params=None):
     p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": i, "method": method,
                               "params": params or {}}) + "\n")
@@ -238,16 +242,25 @@ def call(i, method, params=None):
         if m.get("id") == i:
             return m
     sys.exit("playwright-mcp ended early")
-call(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
-                       "clientInfo": {"name": "smoke", "version": "1"}})
-p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
-r = call(2, "tools/call", {"name": "browser_navigate",
-                           "arguments": {"url": "data:text/html,<title>mcp-smoke</title>ok"}})
-call(3, "tools/call", {"name": "browser_close", "arguments": {}})
-p.stdin.close()
-p.wait(timeout=30)
-if "mcp-smoke" not in json.dumps(r) or r.get("result", {}).get("isError"):
-    sys.exit(json.dumps(r)[:600])
+try:
+    call(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                           "clientInfo": {"name": "smoke", "version": "1"}})
+    p.stdin.write(json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n")
+    r = call(2, "tools/call", {"name": "browser_navigate",
+                               "arguments": {"url": "data:text/html,<title>mcp-smoke</title>ok"}})
+    call(3, "tools/call", {"name": "browser_close", "arguments": {}})
+    if "mcp-smoke" not in json.dumps(r) or r.get("result", {}).get("isError"):
+        sys.exit(json.dumps(r)[:600])
+finally:
+    # Not ending on EOF is no failure: end the server and its Chromium.
+    try:
+        p.stdin.close()
+        p.wait(timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    if p.poll() is None:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.wait()
 PY
 echo "playwright-mcp ok"
 ssh_run 'timeout 120 /opt/uv-tools/notebooklm-py/bin/python -' <<'PY' || fail "notebooklm: Playwright cannot start Chromium"

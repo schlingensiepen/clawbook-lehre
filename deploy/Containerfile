@@ -164,7 +164,7 @@ RUN test -n "${GRAPHIFY_VERSION}" -a -n "${NOTEBOOKLM_VERSION}" \
 RUN chgrp student /opt/ms-playwright \
  && chgrp -R student /opt/ms-playwright/.links \
  && chmod 2775 /opt/ms-playwright /opt/ms-playwright/.links \
- && chmod g+w /opt/ms-playwright/.links/*
+ && find /opt/ms-playwright/.links -type f -exec chmod g+w {} +
 
 # WorkspaceManager from the vendored wheel, checksum pinned in versions.env.
 # Its entry point goes to /opt/clawbook/tool-bin: /usr/local/bin/wsm is a
