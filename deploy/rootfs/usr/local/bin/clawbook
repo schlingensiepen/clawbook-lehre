@@ -2271,10 +2271,14 @@ def cmd_notebooklm(opts):
 #                ({env:NAME}; comments stay), skills in ~/.agents/skills
 #                (it also reads ~/.claude/skills and drops the duplicate),
 #                block in ~/.config/opencode/AGENTS.md
-#   Antigravity  "agy mcp add/remove"; agy resolves no variables: stdio
-#                servers inherit the environment, header keys are written
-#                in plain text (file 0600); skills in ~/.gemini/config/
-#                skills, rules file ~/.gemini/config/rules/clawbook.md
+#   Antigravity  merge of ~/.gemini/config/mcp_config.json (as "agy mcp add"
+#                writes it; keys never on a command line). agy resolves no
+#                variables: stdio servers inherit the environment, header
+#                keys are written in plain text (file 0600); skills in
+#                ~/.gemini/config/skills, rules file
+#                ~/.gemini/config/rules/clawbook.md
+# Files are copied to ~/.clawbook/agenten/sicherung before sync rewrites
+# them; values of keys never appear in reports or agenten-stand.json.
 # Vendor skill commands run with a throwaway HOME and working directory
 # (they also write other files there); the result is cached per image
 # build in ~/.clawbook/agenten/quellen. Names written by sync are noted in
@@ -2303,6 +2307,16 @@ SECRET_REFUSED = {
     "COPILOT_GITHUB_TOKEN": "Copilot nähme dann dieses Token statt Ihrer Anmeldung",
     "GEMINI_API_KEY": "Google-Werkzeuge nähmen dann diesen Schlüssel",
     "GOOGLE_API_KEY": "Google-Werkzeuge nähmen dann diesen Schlüssel",
+}
+# Names that change the shell or every program (same list in
+# /etc/profile.d/clawbook-secrets.sh, which skips them).
+SECRET_REFUSED_PREFIXES = ("LD_", "BASH_", "PYTHON", "NODE_", "XDG_", "LC_", "SSH_")
+SECRET_REFUSED_SYSTEM = {
+    "PATH", "HOME", "SHELL", "IFS", "ENV", "PROMPT_COMMAND", "USER", "LOGNAME", "PWD",
+    "OLDPWD", "TMPDIR", "TERM", "DISPLAY", "LANG", "PS1", "PS2", "PS4", "CDPATH",
+    "GLOBIGNORE", "SHELLOPTS", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN",
+    "OPENAI_BASE_URL", "GOOGLE_APPLICATION_CREDENTIALS", "GH_ENTERPRISE_TOKEN",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "FTP_PROXY",
 }
 BLOCK_START = "<!-- >>> clawbook agenten sync >>> -->"
 BLOCK_END = "<!-- <<< clawbook agenten sync <<< -->"
@@ -2720,7 +2734,10 @@ def mcp_read(agent):
             return {}
         except OSError as e:
             raise ValueError(f"{path}: {e}")
-        servers = jsonc_data(jsonc_parse(text)).get("mcp", {}) if text.strip() else {}
+        data = jsonc_data(jsonc_parse(text)) if text.strip() else {}
+        if not isinstance(data, dict):
+            raise ValueError(f"{path}: kein JSON-Objekt")
+        servers = data.get("mcp", {})
     else:
         servers = read_json_file(home_path(MCP_FILES[agent])).get("mcpServers", {})
     return servers if isinstance(servers, dict) else {}
@@ -2761,7 +2778,8 @@ CODEX_HEADER_RE = re.compile(
 
 def toml_remove_servers(text, names):
     """Removes the tables [mcp_servers.NAME] and [mcp_servers.NAME.*] of the
-    given names, line by line (comments elsewhere stay)."""
+    given names, line by line (comments elsewhere stay). Blank lines are
+    tidied only where a block was cut out, nothing else is touched."""
     out, skipping = [], False
     for line in text.splitlines(keepends=True):
         if re.match(r"^\s*\[", line):
@@ -2769,10 +2787,18 @@ def toml_remove_servers(text, names):
             name = None
             if m:
                 name = json.loads(f'"{m.group(1)}"') if m.group(1) is not None else m.group(2)
-            skipping = name in names
+            if name in names:
+                if not skipping:
+                    while out and not out[-1].strip():
+                        out.pop()
+                skipping = True
+                continue
+            if skipping and out:
+                out.append("\n")
+            skipping = False
         if not skipping:
             out.append(line)
-    return re.sub(r"\n{3,}", "\n\n", "".join(out))
+    return "".join(out)
 
 
 def codex_apply(to_set, to_remove, plain):
@@ -2913,7 +2939,8 @@ def jsonc_set(text, path, value):
     node = jsonc_parse(text)
     for depth, key in enumerate(path):
         if node["k"] != "o":
-            raise ValueError(f"„{path[depth - 1]}“ ist kein Objekt")
+            raise ValueError(f"„{path[depth - 1]}“ ist kein Objekt" if depth
+                             else "oberste Ebene ist kein JSON-Objekt")
         member = next((m for m in node["m"] if m["key"] == key), None)
         rest = path[depth + 1:]
         if member is None:
@@ -2983,7 +3010,8 @@ def opencode_apply(to_set, to_remove):
         text = jsonc_remove(text, ["mcp", name])
     for name, conf in to_set.items():
         text = jsonc_set(text, ["mcp", name], conf)
-    servers = jsonc_data(jsonc_parse(text)).get("mcp", {})
+    data = jsonc_data(jsonc_parse(text))
+    servers = data.get("mcp", {}) if isinstance(data, dict) else {}
     if any(servers.get(n) != c for n, c in to_set.items()) or any(n in servers for n in to_remove):
         raise ValueError(f"{path}: Die Einträge ließen sich nicht sauber ersetzen; nichts geändert")
     write_user_file(path, text, mode=mode)
@@ -3012,33 +3040,68 @@ def mcp_cli_set(agent, name, conf, present):
                 cmd += ["--header", f"{k}: {v}"]
             cmd += [name, conf["url"]]
         rc, out = run_agent(cmd)
-    else:  # agy: "add or update"
-        cmd = ["agy", "mcp", "add"]
-        if "serverUrl" in conf:
-            for k, v in conf.get("headers", {}).items():
-                cmd += ["--header", f"{k}: {v}"]
-            cmd += [name, conf["serverUrl"]]
-        else:
-            for k, v in conf.get("env", {}).items():
-                cmd += ["--env", f"{k}={v}"]
-            cmd += [name, "--", conf["command"]] + conf.get("args", [])
-        rc, out = run_agent(cmd)
+    else:
+        raise ValueError(f"{agent}: kein Befehl zum Eintragen")
     return None if rc == 0 else last_line(out)
 
 
 def mcp_cli_remove(agent, name):
     cmd = {"claude": ["claude", "mcp", "remove", "-s", "user", name],
-           "copilot": ["copilot", "mcp", "remove", name],
-           "agy": ["agy", "mcp", "remove", name]}[agent]
+           "copilot": ["copilot", "mcp", "remove", name]}[agent]
     rc, out = run_agent(cmd)
     return None if rc == 0 else last_line(out)
 
 
-def secure_agy_config():
-    """agy writes its file world-readable; it may hold a key in plain text."""
+def backup_dir():
+    path = os.path.join(agenten_work_dir(), "sicherung")
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
+
+
+def backup_file(path, keep=5):
+    """Copies a configuration file before sync rewrites it (0600; may hold
+    keys). Keeps the newest few copies per file."""
+    if not os.path.isfile(path):
+        return
+    base = backup_dir()
+    prefix = path.replace(user_home() + "/", "").strip("/.").replace("/", "_") + "-"
+    target = os.path.join(base, prefix + now_text().replace(":", ""))
+    with open(path, "rb") as src, open(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                                               0o600), "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    old = sorted(n for n in os.listdir(base) if n.startswith(prefix))
+    for name in old[:-keep]:
+        os.remove(os.path.join(base, name))
+
+
+def backup_entry(agent, name, conf):
+    """Keeps an entry of the student with a name sync takes over."""
+    target = os.path.join(backup_dir(),
+                          f"{agent}-mcp-{name}-{now_text().replace(':', '')}.json")
+    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(dump_json({name: conf}))
+
+
+def agy_apply(to_set, to_remove):
+    """Writes agy's own file directly (keys never appear on a command line,
+    file 0600); same layout as "agy mcp add" (sorted keys)."""
     path = home_path(MCP_FILES["agy"])
-    if os.path.isfile(path) and os.stat(path).st_mode & 0o077:
-        os.chmod(path, 0o600)
+    data = read_json_file(path)
+    servers = data.get("mcpServers")
+    if not isinstance(servers, dict):
+        servers = {}
+    for name in to_remove:
+        servers.pop(name, None)
+    for name, conf in to_set.items():
+        old = servers.get(name) if isinstance(servers.get(name), dict) else {}
+        entry = {k: v for k, v in conf.items() if v not in ({}, [])}
+        entry["disabled"] = old.get("disabled", False) is True
+        servers[name] = entry
+    data["mcpServers"] = servers
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    write_user_file(path, json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+                    mode=0o600)
 
 
 def sync_mcp(agent, desired, plain, managed, report):
@@ -3051,14 +3114,22 @@ def sync_mcp(agent, desired, plain, managed, report):
     to_set = {n: c for n, c in desired.items() if not mcp_equal(agent, current.get(n), c)}
     to_remove = [n for n in sorted(managed) if n not in desired and n in current]
     failed = set()
-    if agent in ("codex", "opencode"):
+    for name in to_set:
+        if name in current and name not in managed:
+            backup_entry(agent, name, current[name])
+    if agent in ("codex", "opencode", "agy"):
         if to_set or to_remove:
             try:
                 if agent == "codex":
+                    backup_file(home_path(MCP_FILES["codex"]))
                     codex_apply(to_set, to_remove, plain)
-                else:
+                elif agent == "opencode":
+                    backup_file(opencode_config_path())
                     opencode_apply(to_set, to_remove)
-            except (ValueError, CliError) as e:
+                else:
+                    backup_file(home_path(MCP_FILES["agy"]))
+                    agy_apply(to_set, to_remove)
+            except (ValueError, CliError, OSError) as e:
                 report["fehler"].append(f"MCP: {e}")
                 failed = set(to_set) | set(to_remove)
     else:
@@ -3072,8 +3143,6 @@ def sync_mcp(agent, desired, plain, managed, report):
             if err:
                 report["fehler"].append(f"MCP {name} nicht eingetragen: {err}")
                 failed.add(name)
-        if agent == "agy":
-            secure_agy_config()
     for name in to_set:
         if name in failed:
             continue
@@ -3157,6 +3226,13 @@ def pick_found(found, ziel):
     return None
 
 
+# A failed vendor command is retried after an hour at the earliest (the
+# start of the container must not hang on it each time); a sync started by
+# hand on a terminal tries at once.
+SKILL_RETRY_SECONDS = 3600
+SKILL_RETRY_NOW = [False]
+
+
 def skill_sources(entry):
     """{target: folder} of a skill. Vendor commands run once per image
     build and definition; the result is kept in ~/.clawbook/agenten/quellen.
@@ -3183,6 +3259,16 @@ def skill_sources(entry):
         return {z: os.path.join(cache, z) for z in SKILL_TARGETS
                 if os.path.isdir(os.path.join(cache, z))}
     os.makedirs(base, exist_ok=True)
+    failed_marker = os.path.join(base, f".fehler-{key}")
+    try:
+        age = time.time() - os.stat(failed_marker).st_mtime
+    except OSError:
+        age = None
+    if age is not None and age < SKILL_RETRY_SECONDS and not SKILL_RETRY_NOW[0]:
+        with open(failed_marker, encoding="utf-8", errors="replace") as f:
+            reason = f.read().strip()
+        raise ValueError(f"{reason} (nächster Versuch in {int((SKILL_RETRY_SECONDS - age) // 60) + 1}"
+                         " min; sofort: clawbook agenten sync am Terminal)")
     new = tempfile.mkdtemp(prefix=".neu-", dir=base)
     sandboxes = []
     try:
@@ -3207,8 +3293,16 @@ def skill_sources(entry):
             f.write(now_text() + "\n")
         for old in os.listdir(base):
             if old != os.path.basename(new):
-                shutil.rmtree(os.path.join(base, old), ignore_errors=True)
+                path = os.path.join(base, old)
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.remove(path)
         os.rename(new, cache)
+    except ValueError as e:
+        with open(failed_marker, "w", encoding="utf-8") as f:
+            f.write(str(e) + "\n")
+        raise
     finally:
         shutil.rmtree(new, ignore_errors=True)
         for sandbox in sandboxes:
@@ -3511,6 +3605,12 @@ def agenten_sync_locked():
                 keep.add(n)
         new_verwaltet["skill"][ziel] = sorted(keep)
     reports = list(result["agenten"].values()) + list(result["skills"].values())
+    # Messages of agent commands may echo a value: never report keys.
+    for r in reports:
+        r["aenderungen"] = [redact(x, secrets) for x in r["aenderungen"]]
+        r["fehler"] = [redact(x, secrets) for x in r["fehler"]]
+    result["hinweise"] = [redact(x, secrets) for x in result["hinweise"]]
+    result["warnungen"] = [redact(x, secrets) for x in result["warnungen"]]
     result["geaendert"] = any(r["aenderungen"] for r in reports)
     result["ok"] = not any(r["fehler"] for r in reports)
     data = {"format": AGENTEN_STAND_FORMAT, "verwaltet": new_verwaltet,
@@ -3519,8 +3619,16 @@ def agenten_sync_locked():
                              "weggelassen": result["weggelassen"],
                              "fehler": [f"{r.get('name', r.get('ordner'))}: {x}"
                                         for r in reports for x in r["fehler"]]}}
-    write_user_file(agenten_stand_path(), dump_json(data), tmp_dir=agenten_work_dir())
+    write_user_file(agenten_stand_path(), dump_json(data), mode=0o600,
+                    tmp_dir=agenten_work_dir())
     return result
+
+
+def redact(text, secrets):
+    for value in sorted(secrets.values(), key=len, reverse=True):
+        if len(value) >= 4:
+            text = text.replace(value, "***")
+    return text
 
 
 def missing_text(item):
@@ -3562,6 +3670,7 @@ def print_sync(result):
 
 
 def cmd_agenten_sync(opts):
+    SKILL_RETRY_NOW[0] = is_terminal() and not opts["json"]
     if not opts["json"]:
         print("Agenten-Ausstattung abgleichen ...", flush=True)
     result = agenten_sync()
@@ -3758,6 +3867,11 @@ def check_secret_name(name):
         raise CliError(f"{name} speichert clawbook nicht: {SECRET_REFUSED[name]}. "
                        "Melden Sie das Werkzeug stattdessen an, wie es die Setup-Seite "
                        "beschreibt.", code=2)
+    if name in SECRET_REFUSED_SYSTEM or name.startswith(SECRET_REFUSED_PREFIXES):
+        raise CliError(f"{name} speichert clawbook nicht: Die Variable würde in jedem "
+                       "Terminal das Verhalten der Shell oder aller Programme ändern. "
+                       "Wählen Sie einen eigenen Namen, zum Beispiel MEIN_DIENST_KEY.",
+                       code=2)
 
 
 def read_secret_value(name, opts):

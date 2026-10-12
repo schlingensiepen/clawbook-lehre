@@ -430,9 +430,22 @@ json_ok "${out}" 'not d["geaendert"] and d["ok"] and [w["name"] for w in d["wegg
   || fail "second clawbook agenten sync changed something: ${out}"
 [ "$(ssh_run 'md5sum ~/.claude.json ~/.codex/config.toml ~/.copilot/mcp-config.json ~/.config/opencode/opencode.json ~/.gemini/config/mcp_config.json ~/.claude/CLAUDE.md ~/.codex/AGENTS.md ~/.gemini/config/rules/clawbook.md')" = "${before}" ] \
   || fail "second clawbook agenten sync rewrote files"
-# Removing the key takes Stitch out again, own entries stay.
-ssh_run 'clawbook agenten schluessel STITCH_API_KEY --entfernen >/dev/null' \
-  || fail "clawbook agenten schluessel --entfernen failed"
+# The key never shows up outside ~/.clawbook/secrets (backups in
+# ~/.clawbook/agenten/sicherung may hold it, 0600) nor in the start log.
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'test "$(stat -c %a ~/.clawbook/agenten-stand.json)" = 600 && ! grep -rq smoke-schluessel-4711 --exclude=secrets --exclude-dir=sicherung --exclude-dir=apt ~/.clawbook 2>/dev/null' \
+  || fail "the key appears in ~/.clawbook outside secrets, or agenten-stand.json is not 0600"
+docker logs "${NAME}" 2>&1 | grep -q smoke-schluessel-4711 && fail "the key appears in the container log"
+# A broken config.toml of the student: sync reports it and leaves the file
+# byte for byte as it is (here while removing the key, so a change is due).
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'cp ~/.codex/config.toml /tmp/config.toml.ok && printf "\n[kaputt\n" >> ~/.codex/config.toml && md5sum ~/.codex/config.toml > /tmp/config.toml.md5'
+rc=0; out=$(ssh_run 'clawbook agenten schluessel STITCH_API_KEY --entfernen --json') || rc=$?
+if [ "${rc}" != 1 ] || ! json_ok "${out}" 'not d["sync"]["ok"] and d["sync"]["agenten"]["codex"]["fehler"] and "MCP stitch entfernt" in d["sync"]["agenten"]["claude"]["aenderungen"]'; then
+  fail "sync with a broken config.toml: expected ok=false and a Codex error: ${out}"
+fi
+ssh_run 'md5sum -c --quiet /tmp/config.toml.md5 && cp /tmp/config.toml.ok ~/.codex/config.toml && clawbook agenten sync >/dev/null' \
+  || fail "sync changed a broken config.toml, or the sync after repairing it failed"
 ssh_run '! grep -q stitch ~/.codex/config.toml ~/.copilot/mcp-config.json ~/.config/opencode/opencode.json ~/.gemini/config/mcp_config.json && ! claude mcp get stitch </dev/null >/dev/null 2>&1 && claude mcp get eigener </dev/null >/dev/null' \
   || fail "Stitch not removed after the key was removed, or own entries lost"
 echo "agent equipment ok"

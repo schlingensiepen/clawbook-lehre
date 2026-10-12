@@ -17,8 +17,17 @@ if [ -n "${HOME:-}" ] && [ -f "${HOME}/.clawbook/secrets" ] \
       ''|'#'*) ;;
       *=?*)
         _clawbook_name=${_clawbook_line%%=*}
+        # Names that would change the shell or every program are skipped
+        # (same list as SECRET_REFUSED_* in /usr/local/bin/clawbook).
         case ${_clawbook_name} in
           ''|[0-9]*|*[!A-Za-z0-9_]*) ;;
+          LD_*|BASH_*|PYTHON*|NODE_*|XDG_*|LC_*|SSH_*) ;;
+          PATH|HOME|SHELL|IFS|ENV|PROMPT_COMMAND|USER|LOGNAME|PWD|OLDPWD|TMPDIR) ;;
+          TERM|DISPLAY|LANG|PS1|PS2|PS4|CDPATH|GLOBIGNORE|SHELLOPTS) ;;
+          ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_BASE_URL|CLAUDE_CODE_OAUTH_TOKEN) ;;
+          OPENAI_API_KEY|OPENAI_BASE_URL|CODEX_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY) ;;
+          GOOGLE_APPLICATION_CREDENTIALS|GH_TOKEN|GITHUB_TOKEN|COPILOT_GITHUB_TOKEN) ;;
+          GH_ENTERPRISE_TOKEN|*_PROXY|*_proxy) ;;
           *) export "${_clawbook_name}=${_clawbook_line#*=}" ;;
         esac
         ;;

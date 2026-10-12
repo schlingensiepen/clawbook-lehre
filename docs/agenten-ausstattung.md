@@ -172,7 +172,9 @@ Sie ihn mit:
 Weil die Schlüssel so in jedem Programm ankommen, nimmt
 clawbook keine an, die die Anmeldung eines Agenten
 umstellen würden (zum Beispiel `ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `GH_TOKEN`); siehe
+`OPENAI_API_KEY`, `GH_TOKEN`), und keine, die die Shell
+oder alle Programme verändern würden (zum Beispiel
+`PATH`, `LD_PRELOAD`, `HTTPS_PROXY`); siehe
 [Setup](setup/README.md#drei-regeln-für-schlüssel-und-zugänge),
 „Drei Regeln für Schlüssel und Zugänge“.
 
@@ -194,6 +196,8 @@ Umgebungsvariablen an den Wiki.js-Server weiter.
 > - `~/.claude.json` — enthält Schlüssel im Klartext,
 >   wenn Sie einen Server von Hand eingetragen haben
 >   (siehe „Falls die Automatik nicht geht“)
+> - `~/.clawbook/agenten/sicherung/` — Kopien dieser
+>   Einstellungsdateien, ebenfalls mit Schlüsseln
 >
 > Nicht in ein Repository, nicht in einen Chat, nicht in
 > eine Hilfe-Anfrage. Bitten Sie auch keinen Agenten,
@@ -259,7 +263,7 @@ sonst in Git).
 | Codex | `~/.codex/config.toml` | `~/.agents/skills/` | Block in `~/.codex/AGENTS.md` |
 | Copilot CLI | `~/.copilot/mcp-config.json` (über `copilot mcp`) | `~/.agents/skills/` | Block in `~/.copilot/copilot-instructions.md` |
 | OpenCode | `~/.config/opencode/opencode.json` | `~/.agents/skills/` | Block in `~/.config/opencode/AGENTS.md` |
-| Antigravity | `~/.gemini/config/mcp_config.json` (über `agy mcp`) | `~/.gemini/config/skills/` | eigene Datei `~/.gemini/config/rules/clawbook.md` |
+| Antigravity | `~/.gemini/config/mcp_config.json` | `~/.gemini/config/skills/` | eigene Datei `~/.gemini/config/rules/clawbook.md` |
 
 Der Block steht zwischen den Zeilen
 `<!-- >>> clawbook agenten sync >>> -->` und
@@ -276,9 +280,14 @@ Einträge es selbst angelegt hat, und ändert oder
 entfernt nur diese. Gibt es schon einen Eintrag mit
 demselben Namen, etwa einen `playwright`-Server, den Sie
 früher von Hand eingetragen haben, ersetzt clawbook ihn
-und meldet „übernommen“. Einen Skill mit demselben Namen
-und anderem Inhalt legt es vorher in
-`~/.clawbook/agenten/sicherung/` ab.
+und meldet „übernommen“. Den alten Eintrag legt es
+vorher in `~/.clawbook/agenten/sicherung/` ab, ebenso
+einen Skill mit demselben Namen und anderem Inhalt.
+Bevor clawbook `config.toml`, `opencode.json` oder
+`mcp_config.json` neu schreibt, kopiert es die Datei
+dorthin (die letzten fünf Fassungen). Ist eine dieser
+Dateien ungültig, ändert es sie nicht und meldet
+„MCP-Konfiguration nicht lesbar, nichts geändert“.
 
 ## Das tun Sie selbst (optional): eigene Einträge
 
