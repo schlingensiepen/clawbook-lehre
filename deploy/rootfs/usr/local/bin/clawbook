@@ -451,7 +451,9 @@ def cmd_key_new(opts):
     print("Neues Schlüsselpaar erzeugt; authorized_keys ist angepasst.")
     print(f"Fingerabdruck: {info['fingerabdruck'] or 'unbekannt'}")
     print("Den privaten Schlüssel für Windows zeigt: clawbook key show --private")
-    print("Neuen Schlüssel bei GitHub hinterlegen:")
+    print("Neuen Schlüssel bei GitHub hinterlegen (nur nötig, wenn du bei GitHub")
+    print("angemeldet bist; sonst erledigt das die GitHub-Anmeldung im Menü):")
+    print("  gh auth refresh -s admin:public_key")
     print("  gh ssh-key add ~/.ssh/id_ed25519.pub --title clawbook")
     print("Den alten Eintrag löschst du unter https://github.com/settings/keys")
     return 0

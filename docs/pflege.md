@@ -454,8 +454,8 @@ starte ihn zuerst." und startet ihn.
 `%LOCALAPPDATA%\clawbook\logs\clawbook-JJJJMMTT-HHMM.log`
 (eine Datei pro Lauf, die neuesten 30 bleiben); den Pfad
 nennt es am Anfang und bei jedem Fehler. Scheitert der
-Download des Images, steht die Meldung von `wslc` im
-Protokoll. Ihren privaten Schlüssel schwärzt es darin. Sie
+Download des Images, steht die Meldung von `wslc` (aus dem
+letzten Versuch) im Protokoll. Ihren privaten Schlüssel schwärzt es darin. Sie
 dürfen das Protokoll an die Betreuung schicken — werfen
 Sie vorher kurz einen Blick hinein.
 
