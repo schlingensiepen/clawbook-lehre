@@ -1332,7 +1332,8 @@ function Show-Menu {
       $state = if ($s.Running) { 'läuft' } elseif ($s.Exists) { 'angehalten' } else { 'noch nicht angelegt' }
       Say "  (Container: $state)"
       Say '  [1] starten und verbinden (Vorgabe)'
-      Say '  [2] auf das neueste Image aktualisieren'
+      if ($Image -like '*:latest') { Say '  [2] auf das neueste Image aktualisieren' }
+      else { Say ("  [2] auf das Image {0} wechseln (Testmodus)" -f ($Image -replace '^.*:', '')) }
       Say '  [3] mitnehmen: Home als Sicherung speichern'
       Say '  [4] aus einer Sicherung importieren'
       Say '  [5] SSH für VS Code neu einrichten'
