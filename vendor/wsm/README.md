@@ -3,8 +3,8 @@
 Vendored wheel of the WorkspaceManager, installed into the image as the
 command `wsm` (see `deploy/Containerfile`).
 
-- File: `wsm-1.1.1-py3-none-any.whl` (release v1.1.1)
-- SHA-256: `7cdd9836a6f303a3ff2f440a8ff334e69aa1f5d1e58823bd0efe497fb89c74da`
+- File: `wsm-1.1.0-py3-none-any.whl` (release v1.1.0)
+- SHA-256: `4644a6ae521879196092bd737f67f615a1bb4e90c4b76186e7626baa2794e8d5`
   (checked during the image build, value in `deploy/versions.env`)
 - License: Apache-2.0 (see the license file inside the wheel)
 

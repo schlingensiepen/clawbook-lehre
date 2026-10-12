@@ -678,9 +678,7 @@ Ihre Projekte liegen unter `~/source`, geordnet nach
 Bereichen: `~/source/<Bereich>/<Projekt>`, jedes Projekt
 ein eigenes Git-Repository. Ein erstes Beispiel ist schon
 da: `~/source/samples/primer` im Bereich `samples` — dort
-können Sie gefahrlos ausprobieren. Weitere Bereiche wie
-`github` (eigene Projekte) oder `sandbox` (Experimente)
-richtet der WorkspaceManager beim ersten Start ein. Er
+können Sie gefahrlos ausprobieren. Der WorkspaceManager
 legt neue Projekte mit dem Befehl `wsm` in dieser
 Struktur an und startet Agenten darin; `wsm --help`
 zeigt seine Möglichkeiten. Melden Sie sich vor dem
