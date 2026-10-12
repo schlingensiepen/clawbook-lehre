@@ -5,7 +5,9 @@
 #
 # Starts the image with a fresh home volume and checks: healthcheck, all
 # tools (clawbook-check), build stamp, SSH login as "student" with the key
-# from the home volume, the CLI clawbook (JSON interface), RDP port and XWayland display, Samba share
+# from the home volume, the CLI clawbook (JSON interface), the menu on SSH
+# login and the GitHub question (also in front of wsm), RDP port and
+# XWayland display, Samba share
 # (read/write with the shown password), and that keys survive recreating
 # the container with the same home volume.
 #
@@ -130,7 +132,67 @@ if [ "${rc}" != 2 ] || ! json_ok "${out}" 'd == {"verfuegbar": False}'; then
   fail "clawbook pakete --json: expected exit 2 and {\"verfuegbar\": false}"
 fi
 ssh_run 'clawbook key show --json' >/dev/null || fail "clawbook key show --json failed"
+# The status interface stays as the Windows script knows it.
+out=$(ssh_run 'clawbook status --json')
+json_ok "${out}" 'sorted(d) == ["aufgerufen_als", "benutzer", "build", "dienste", "home", "image", "schnittstelle"] and d["schnittstelle"] == 1' \
+  || fail "clawbook status --json: fields changed"
 echo "cli ok"
+
+# GitHub, menu on login, wsm wrapper. No gh login exists in the test, so
+# every interactive path starts with the GitHub question.
+ssh_tty() {
+  # $1 = input typed into the terminal, rest = remote command (none: login)
+  local input=$1; shift
+  printf '%b' "${input}" | timeout 90 ssh -tt -i "${WORK}/key" -p "${SSH_PORT}" \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
+    student@127.0.0.1 "$@" 2>&1
+}
+# --json and missing terminals never ask.
+# has PATTERN: the last output contains PATTERN (extended regex).
+has() { grep -qE -- "$1" <<<"${out}"; }
+out=$(ssh_tty '' 'clawbook github login --json; echo "rc=$?"')
+if ! has 'rc=2' || ! has '"fehler"'; then
+  fail "clawbook github login --json did not refuse at once: ${out}"
+fi
+out=$(ssh_tty '' 'clawbook github status --json; echo "rc=$?"')
+if ! has '"angemeldet": false' || ! has 'rc=1'; then
+  fail "clawbook github status --json: unexpected: ${out}"
+fi
+out=$(ssh_run 'clawbook </dev/null; echo "rc=$?"') || fail "clawbook without terminal failed"
+if ! has 'rc=0' || has 'GitHub-Anmeldung'; then
+  fail "clawbook without terminal asked for GitHub: ${out}"
+fi
+# "ssh clawbook <command>" (also with a terminal) gets no menu.
+out=$(ssh_tty '' 'echo marker-ok')
+if ! has 'marker-ok' || has 'clawbook - Menü|GitHub-Anmeldung'; then
+  fail "menu shown for ssh with a command: ${out}"
+fi
+out=$(ssh_run 'echo marker-ok')
+[ "${out}" = marker-ok ] || fail "ssh with a command printed more than its output: ${out}"
+# Interactive login: GitHub question first (cancel), then the menu (end).
+out=$(ssh_tty '2\n0\nexit\n')
+if ! has 'GitHub-Anmeldung' || ! has 'clawbook - Menü' || ! has 'jederzeit wieder mit: clawbook'; then
+  fail "SSH login did not open GitHub question and menu: ${out}"
+fi
+# Menu item 8 switches the menu on login off; the next login stays quiet.
+ssh_tty '2\n8\n0\nexit\n' >/dev/null
+ssh_run 'test -e ~/.clawbook/menue-beim-login-aus' || fail "menu item 8 did not switch the login menu off"
+out=$(ssh_tty 'exit\n')
+if has 'clawbook - Menü|GitHub-Anmeldung' || ! has 'öffnest du mit: clawbook'; then
+  fail "menu shown although switched off: ${out}"
+fi
+ssh_tty '2\n8\n0\n' 'clawbook' >/dev/null
+ssh_run 'test ! -e ~/.clawbook/menue-beim-login-aus' || fail "menu item 8 did not switch the login menu on again"
+# wsm: wrapper in /usr/local/bin, real entry point elsewhere.
+ssh_run 'test -x /opt/clawbook/tool-bin/wsm && head -c 2 /usr/local/bin/wsm | grep -q "#!"' \
+  || fail "wsm wrapper or real wsm missing"
+ssh_run 'wsm --help' >/dev/null || fail "wsm --help without terminal failed"
+out=$(ssh_tty '2\nn\n' 'wsm; echo "rc=$?"')
+if ! has 'richtet sich jetzt zum ersten Mal ein' || ! has 'rc=1'; then
+  fail "wsm wrapper did not ask for GitHub first: ${out}"
+fi
+ssh_run 'test ! -e ~/.workspacemanager.yml' || fail "a wsm configuration was created"
+echo "login ok"
 
 # Sample project in the WorkspaceManager layout, a git repo owned by student.
 ssh_run 'git -C ~/source/samples/primer log --oneline -1 && test -f ~/source/samples/primer/README.md' \

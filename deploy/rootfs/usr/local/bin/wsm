@@ -1,0 +1,27 @@
+#!/bin/bash
+# wsm (WorkspaceManager) with a GitHub check in front.
+#
+# On its first run wsm writes ~/.workspacemanager.yml and takes the GitHub
+# name from "gh". Without a gh login it asks for the name and stores
+# "student" when nothing is typed. So: as long as the config is missing
+# and gh is not logged in, the GitHub login comes first (with the option
+# to cancel). Without a terminal nothing is asked; the arguments always go
+# to the real wsm unchanged.
+#
+# The real wsm lives in /opt/clawbook/tool-bin (see deploy/Containerfile).
+REAL=/opt/clawbook/tool-bin/wsm
+
+check=1
+for arg in "$@"; do
+  case "${arg}" in
+    -h|--help|--version) check=0 ;;
+  esac
+done
+
+if [ "${check}" = 1 ] && [ -t 0 ] && [ -t 1 ] && [ "$(id -u)" != 0 ] \
+   && [ ! -e "${HOME}/.workspacemanager.yml" ] \
+   && ! gh auth status --hostname github.com >/dev/null 2>&1; then
+  /usr/local/bin/clawbook github login --vor-wsm || exit 1
+fi
+
+exec "${REAL}" "$@"

@@ -79,6 +79,11 @@ $VsCodeApi = 'https://update.code.visualstudio.com/api/update/win32-x64-archive/
 $VsCodeLatest = 'https://update.code.visualstudio.com/latest/win32-x64-archive/stable'
 $ShortcutName = 'clawbook VS Code.lnk'
 
+# Lowest interface version of the CLI "clawbook" in the container this
+# script uses; older images get the old way and a hint to update.
+$MinInterface = 1
+$OldImageHinted = $false
+
 # Shown whenever the container does not come up in time.
 $TimeoutHint = "Der Container braucht länger als sonst. Warte eine Minute und wähle dann im Menü [1] ‚starten und verbinden‘."
 $LongWaitHint = 'Das kann einige Minuten dauern – bitte nicht abbrechen.'
@@ -375,18 +380,66 @@ function Update-Ssh {
   }
 }
 
+# --- CLI clawbook in the container -------------------------------------------
+function ConvertFrom-CliJson([string]$Text) {
+  # The JSON object from wslc output (stderr may be mixed in); $null if none.
+  if (-not $Text) { return $null }
+  $start = $Text.IndexOf('{')
+  $end = $Text.LastIndexOf('}')
+  if ($start -lt 0 -or $end -le $start) { return $null }
+  try { return ($Text.Substring($start, $end - $start + 1) | ConvertFrom-Json) }
+  catch { Log ("JSON nicht lesbar: {0}" -f $_.Exception.Message); return $null }
+}
+
+function Get-CliStatus {
+  # "clawbook status --json" of the running container, or $null for an
+  # image without the CLI or with an older interface.
+  $r = Invoke-Wslc exec $Container clawbook status --json
+  if ($r.Code -ne 0) { return $null }
+  $s = ConvertFrom-CliJson $r.Out
+  if (-not $s -or -not ($s.PSObject.Properties.Name -contains 'schnittstelle')) { return $null }
+  if ([int]$s.schnittstelle -lt $MinInterface) { return $null }
+  return $s
+}
+
+function Show-OldImageHint {
+  if ($script:OldImageHinted) { return }
+  $script:OldImageHinted = $true
+  Say 'Hinweis: Das Image im Container ist älter als dieses Skript. Aktualisiere es mit Menüpunkt [2].' 'Yellow'
+}
+
+function Save-Stand {
+  # Writes ~/.clawbook/stand.json in the running container, so a backup or
+  # an update carries the state (packages, course). Skipped on older images.
+  if (-not (Get-CliStatus)) { Log 'clawbook stand: CLI nicht verfügbar, übersprungen'; return }
+  $r = Invoke-Wslc exec $Container clawbook stand --write --json
+  if ($r.Code -eq 0) { Say 'Stand gespeichert (~/.clawbook/stand.json im Home).' }
+  else { Say 'Hinweis: Der Stand (~/.clawbook/stand.json) ließ sich nicht speichern. Es geht trotzdem weiter.' 'Yellow' }
+}
+
 function Set-Ssh {
-  # Private key: readable only by the current user (OpenSSH for Windows
-  # refuses keys that others can read).
-  $r = Invoke-Wslc exec $Container cat /home/student/.ssh/id_ed25519
-  if ($r.Out -notmatch 'BEGIN OPENSSH PRIVATE KEY') {
+  # Private key via the CLI; older images: read the file directly.
+  $privateKey = $null
+  if (Get-CliStatus) {
+    $k = ConvertFrom-CliJson (Invoke-Wslc exec $Container clawbook key show --private --json).Out
+    if ($k -and "$($k.privat)" -match 'BEGIN OPENSSH PRIVATE KEY') { $privateKey = "$($k.privat)" }
+  } else {
+    Show-OldImageHint
+  }
+  if (-not $privateKey) {
+    $r = Invoke-Wslc exec $Container cat /home/student/.ssh/id_ed25519
+    if ($r.Out -match 'BEGIN OPENSSH PRIVATE KEY') { $privateKey = $r.Out }
+  }
+  if (-not $privateKey) {
     Fail "Der SSH-Schlüssel ließ sich nicht aus dem Container lesen. $TimeoutHint"
   }
+  # Readable only by the current user (OpenSSH for Windows refuses keys
+  # that others can read).
   if (Test-Path $KeyFile) {
     & icacls $KeyFile /grant:r "$($env:USERNAME):(F)" | Out-Null
     Remove-Item -Force $KeyFile
   }
-  [IO.File]::WriteAllText($KeyFile, (($r.Out -replace "`r`n", "`n").Trim() + "`n"))
+  [IO.File]::WriteAllText($KeyFile, (($privateKey -replace "`r`n", "`n").Trim() + "`n"))
   & icacls $KeyFile /inheritance:r /grant:r "$($env:USERNAME):(R)" | Out-Null
 
   $block = @(
@@ -446,8 +499,17 @@ function Show-Status {
   Say ("Gewünschtes Image:  {0}" -f $Image)
   Say ("Benutztes Image:    {0}" -f $(if ($s.Exists) { Get-UsedImage $s.Inspect } else { 'noch nicht angelegt' }))
   if ($s.Running) {
-    $b = Invoke-Wslc exec $Container cat /etc/clawbook-build
-    Say ("Build:              {0}" -f (($b.Out -split "`n") -join ', '))
+    $cli = Get-CliStatus
+    if ($cli) {
+      $commit = if ($cli.build -and $cli.build.commit) { "$($cli.build.commit)" } else { 'unbekannt' }
+      $built = if ($cli.build -and $cli.build.erstellt) { " (erstellt $($cli.build.erstellt))" } else { '' }
+      Say ("Schnittstelle:      {0}" -f $cli.schnittstelle)
+      Say ("Build:              {0}{1}" -f $commit, $built)
+    } else {
+      Say 'Schnittstelle:      keine (älteres Image – aktualisieren mit Menüpunkt [2])'
+      $b = Invoke-Wslc exec $Container cat /etc/clawbook-build
+      Say ("Build:              {0}" -f (($b.Out -split "`n") -join ', '))
+    }
   }
   $files = @(Get-ChildItem -Path $BackupDir -Filter 'home-*.tar' -ErrorAction SilentlyContinue)
   if ($files.Count -eq 0) { Say ("Sicherungen:        keine (Ordner {0})" -f $BackupDir) }
@@ -489,6 +551,7 @@ function Export-Home($Target, [switch]$NoRestart) {
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   $name = Split-Path -Leaf $Target
   $wasRunning = $s.Running
+  if ($wasRunning) { Save-Stand }
   Stop-Clawbook
   # Size check: home size (approx.) against free space.
   Say 'Prüfe, wie groß dein Home ist und ob genug Platz frei ist ...'
@@ -533,13 +596,38 @@ function Select-Backup {
 
 function Test-Archive($Dir, $Name) {
   # Readable tar with a clawbook home inside (./.ssh or ./source at top level)?
-  # Returns 'ok', 'unreadable' or 'foreign'.
+  # Returns @{ Result = 'ok', 'unreadable' or 'foreign'; Stand = contents of
+  # ./.clawbook/stand.json or $null (older backups have none) }. Only that
+  # one file is read from the archive.
   $sh = 'if ! tar -tf "/in/$1" > /tmp/list 2> /tmp/err; then echo CLAWBOOK_UNREADABLE; head -n 5 /tmp/err; ' +
-    'elif grep -qE "^(\./)?(\.ssh|source)(/|$)" /tmp/list; then echo CLAWBOOK_OK; else echo CLAWBOOK_FOREIGN; fi'
+    'elif grep -qE "^(\./)?(\.ssh|source)(/|$)" /tmp/list; then echo CLAWBOOK_OK; ' +
+    'm=$(grep -m 1 -E "^(\./)?\.clawbook/stand\.json$" /tmp/list); ' +
+    'if [ -n "$m" ]; then echo CLAWBOOK_STAND_BEGIN; tar -xOf "/in/$1" --occurrence=1 "$m"; echo; echo CLAWBOOK_STAND_END; fi; ' +
+    'else echo CLAWBOOK_FOREIGN; fi'
   $r = Invoke-WslcWithDots run --rm -v "${Dir}:/in" $HelperImage sh -c $sh sh $Name
-  if ($r.Out -match 'CLAWBOOK_OK') { return 'ok' }
-  if ($r.Out -match 'CLAWBOOK_FOREIGN') { return 'foreign' }
-  return 'unreadable'
+  $stand = $null
+  if ($r.Out -match '(?s)CLAWBOOK_STAND_BEGIN(.*?)CLAWBOOK_STAND_END') { $stand = ConvertFrom-CliJson $Matches[1] }
+  if ($r.Out -match 'CLAWBOOK_OK') { return @{ Result = 'ok'; Stand = $stand } }
+  if ($r.Out -match 'CLAWBOOK_FOREIGN') { return @{ Result = 'foreign'; Stand = $null } }
+  return @{ Result = 'unreadable'; Stand = $null }
+}
+
+function Show-BackupStand($Stand) {
+  # Shows what ~/.clawbook/stand.json of a backup says; older backups have none.
+  if (-not $Stand) { Log 'Sicherung ohne .clawbook/stand.json (ältere Sicherung)'; return }
+  $date = if ($Stand.datum) { "$($Stand.datum)" } else { 'unbekannt' }
+  try {
+    $date = [datetime]::Parse($date, [Globalization.CultureInfo]::InvariantCulture,
+      [Globalization.DateTimeStyles]::RoundtripKind).ToLocalTime().ToString('dd.MM.yyyy HH:mm')
+  } catch { $null = $_ }
+  $build = if ($Stand.build -and $Stand.build.commit) { "$($Stand.build.commit)" } else { 'unbekannt' }
+  $id = if ($Stand.kennung) { "$($Stand.kennung)" } else { 'unbekannt' }
+  $packages = @($Stand.pakete | Where-Object { $_ } | ForEach-Object { '{0} {1}' -f $_.name, $_.version })
+  Say 'Stand der Sicherung:'
+  Say ("  Datum:    {0}" -f $date)
+  Say ("  Build:    {0}" -f $build)
+  Say ("  Kennung:  {0}" -f $id)
+  Say ("  Pakete:   {0}" -f $(if ($packages.Count -gt 0) { $packages -join ', ' } else { 'keine' }))
 }
 
 function Import-Home($Source) {
@@ -554,8 +642,9 @@ function Import-Home($Source) {
   Say '[1/5] Prüfe die Sicherung ...' 'Cyan'
   Say $LongWaitHint 'Cyan'
   $check = Test-Archive $dir $name
-  if ($check -eq 'unreadable') { Fail "Die Datei ist keine lesbare Sicherung: $Source`nDein Home ist unverändert." }
-  if ($check -eq 'foreign') { Fail "Die Datei sieht nicht wie eine clawbook-Sicherung aus (kein .ssh oder source darin): $Source`nDein Home ist unverändert." }
+  if ($check.Result -eq 'unreadable') { Fail "Die Datei ist keine lesbare Sicherung: $Source`nDein Home ist unverändert." }
+  if ($check.Result -eq 'foreign') { Fail "Die Datei sieht nicht wie eine clawbook-Sicherung aus (kein .ssh oder source darin): $Source`nDein Home ist unverändert." }
+  Show-BackupStand $check.Stand
 
   $s = Get-State
   if ($s.Volume) {
@@ -610,6 +699,7 @@ function Update-Clawbook {
   Invoke-Pull $Image
   Ensure-HelperImage
   Say '[2/4] Halte den Container an und entferne ihn (dein Home bleibt erhalten) ...' 'Cyan'
+  if ((Get-State).Running) { Save-Stand }
   Stop-Clawbook
   Remove-ClawbookContainer
   Say '[3/4] Lege den Container mit dem neuen Image an ...' 'Cyan'
@@ -1084,8 +1174,9 @@ function Set-PackShortcut($Pack) {
   }
 }
 
-function Install-VsCodePack {
-  # Menu [10] and -Action vscode-install.
+function Install-VsCodePack([switch]$StartFollows) {
+  # Menu [10] and -Action vscode-install. -StartFollows: VS Code starts
+  # right afterwards, so the hint on how to start it is left out.
   $id = Get-CourseId
   $course = Read-CourseDescription $id
   if (-not $course) { Fail ('Die Kursbeschreibung für „{0}“ ließ sich nicht laden. Prüfe deine Internetverbindung und versuche es dann erneut.' -f $id) }
@@ -1167,7 +1258,9 @@ function Install-VsCodePack {
     Say 'Nicht alle Erweiterungen ließen sich installieren. Wähle später noch einmal Menüpunkt [10].' 'Yellow'
   }
   Say ("VSCodePack bereit: VS Code {0} in {1}" -f $latest.Version, $target) 'Green'
-  Say 'Starten mit Menüpunkt [9] oder über „clawbook VS Code“ im Startmenü.' 'Green'
+  if (-not $StartFollows) {
+    Say 'Starten mit Menüpunkt [9] oder über „clawbook VS Code“ im Startmenü.' 'Green'
+  }
 }
 
 function Start-VsCodePack {
@@ -1186,7 +1279,7 @@ function Start-VsCodePack {
       Say 'Abgebrochen.'
       return
     }
-    Install-VsCodePack
+    Install-VsCodePack -StartFollows
     $packs = @(Get-PackVersions $id)
     if ($packs.Count -eq 0) { Fail 'Das VSCodePack ist nach der Installation nicht zu finden.' }
   }

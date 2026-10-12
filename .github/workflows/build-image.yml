@@ -47,6 +47,8 @@ jobs:
           shellcheck deploy/rootfs/etc/cont-init.d/10-clawbook \
                      deploy/rootfs/etc/services.d/*/run \
                      deploy/rootfs/usr/local/bin/clawbook-* \
+                     deploy/rootfs/usr/local/bin/wsm \
+                     deploy/rootfs/etc/profile.d/zz-clawbook-menu.sh \
                      deploy/check-versions.sh \
                      deploy/smoke-test.sh
       - name: Check Python scripts

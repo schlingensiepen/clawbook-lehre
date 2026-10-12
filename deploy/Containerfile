@@ -137,13 +137,18 @@ RUN test -n "${GRAPHIFY_VERSION}" -a -n "${NOTEBOOKLM_VERSION}" \
  && chmod -R a+rX /opt/uv-tools \
  && uv cache clean
 
-# WorkspaceManager from the vendored wheel, checksum pinned in versions.env
+# WorkspaceManager from the vendored wheel, checksum pinned in versions.env.
+# Its entry point goes to /opt/clawbook/tool-bin: /usr/local/bin/wsm is a
+# wrapper (from rootfs) that asks for the GitHub login before wsm writes
+# its first configuration, then hands over to the real wsm.
 ARG WSM_VERSION
 ARG WSM_SHA256
 COPY vendor/wsm/ /tmp/wsm/
 RUN test -n "${WSM_VERSION}" -a -n "${WSM_SHA256}" \
  && echo "${WSM_SHA256}  /tmp/wsm/wsm-${WSM_VERSION}-py3-none-any.whl" | sha256sum -c - \
- && uv tool install "/tmp/wsm/wsm-${WSM_VERSION}-py3-none-any.whl" \
+ && UV_TOOL_BIN_DIR=/opt/clawbook/tool-bin \
+      uv tool install "/tmp/wsm/wsm-${WSM_VERSION}-py3-none-any.whl" \
+ && test -x /opt/clawbook/tool-bin/wsm \
  && chmod -R a+rX /opt/uv-tools \
  && rm -rf /tmp/wsm \
  && uv cache clean
@@ -153,7 +158,8 @@ COPY deploy/rootfs/ /
 
 RUN chmod 0755 /etc/cont-init.d/10-clawbook /etc/services.d/*/run \
                /usr/local/bin/clawbook /usr/local/bin/clawbook-* \
-               /usr/local/bin/notebooklm-fix-cookies \
+               /usr/local/bin/notebooklm-fix-cookies /usr/local/bin/wsm \
+ && chmod 0644 /etc/profile.d/zz-clawbook-menu.sh \
  && mkdir -p /run/sshd
 
 ARG CLAWBOOK_BUILD=unknown

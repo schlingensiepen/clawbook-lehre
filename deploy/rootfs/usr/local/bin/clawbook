@@ -12,7 +12,15 @@ the exit code tells success (0) or failure (non-zero).
     clawbook key new [--yes]        new key pair, replaces the old one
     clawbook stand [--write]        derived state (packages, course, VS Code)
     clawbook kurs vscode <id>       course description (vscode.json)
+    clawbook github status [--json] is gh logged in to GitHub? (never prompts)
+    clawbook github login           GitHub login with gh (needs a terminal)
     clawbook pakete ...             packages and courses (later version)
+
+Interactive start: when gh is not logged in, the menu begins with the
+GitHub login (the student may cancel; then she is asked again next time).
+/etc/profile.d/zz-clawbook-menu.sh opens the menu on interactive SSH
+logins; /usr/local/bin/wsm asks for the GitHub login before the first run
+of the WorkspaceManager ("clawbook github login --vor-wsm").
 
 Only the Python standard library is used. User-facing output is German.
 The script works for the user "student" and for root (docker exec / wslc
@@ -41,6 +49,10 @@ VSCODE_LISTS_DIR = "/usr/share/clawbook/vscode-extensions.d"
 SERVICES = ("sshd", "weston", "smbd")
 COURSE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 DEFAULT_COURSE = "clawbook"
+GH_HOST = "github.com"
+# Marker in ~/.clawbook: do not open the menu on SSH login. Same name in
+# /etc/profile.d/zz-clawbook-menu.sh.
+MENU_OFF_FILE = "menue-beim-login-aus"
 
 # Tools checked by "clawbook check": (name, command). Same checks and order
 # as the former shell script clawbook-check.
@@ -92,6 +104,8 @@ Aufruf:
                                    --write speichert ~/.clawbook/stand.json
   clawbook kurs vscode <kennung> [--json]
                                    Kursbeschreibung für VS Code
+  clawbook github status [--json]  bist du bei GitHub angemeldet?
+  clawbook github login            bei GitHub anmelden (Browser, Gerätecode)
   clawbook pakete ...              Pakete und Kurse (kommt später)
   clawbook --version | --help
 
@@ -572,23 +586,264 @@ def cmd_pakete(opts):
     return 2
 
 
+# --- github ----------------------------------------------------------------
+# gh keeps its login in the home of "student" (~/.config/gh). When clawbook
+# runs as root (docker exec / wslc exec), gh is called as "student".
+
+def as_user(cmd):
+    if os.geteuid() == 0:
+        return ["runuser", "-u", USER_NAME, "--"] + cmd
+    return cmd
+
+
+def is_terminal():
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def in_vscode():
+    return (os.environ.get("TERM_PROGRAM") == "vscode"
+            or any(k.startswith("VSCODE_") for k in os.environ))
+
+
+def github_state():
+    """{"angemeldet": bool, "benutzer": str|None, "geprueft": bool}.
+
+    Never prompts. "geprueft" is False when a token is stored but GitHub
+    could not be asked (e.g. offline) - then it counts as logged in, so an
+    offline login does not nag with a new GitHub login."""
+    state = {"angemeldet": False, "benutzer": None, "geprueft": True}
+    if not shutil.which("gh"):
+        return state
+    rc, out = run(as_user(["gh", "auth", "status", "--hostname", GH_HOST]), timeout=20)
+    if rc == 0:
+        m = re.search(r"account\s+(\S+)", out) or re.search(r"\bas\s+(\S+)", out)
+        state.update(angemeldet=True, benutzer=m.group(1) if m else None)
+        return state
+    token_rc, _ = run(as_user(["gh", "auth", "token", "--hostname", GH_HOST]), timeout=10)
+    if token_rc == 0 and not re.search(r"invalid|expired|revoked|401", out, re.IGNORECASE):
+        state.update(angemeldet=True, geprueft=False)
+    return state
+
+
+def github_known_hosts():
+    """Adds GitHub's SSH host keys (from the authenticated API) to
+    ~/.ssh/known_hosts, so the first git over SSH does not ask about them."""
+    rc, out = run(as_user(["gh", "api", "meta", "--jq", ".ssh_keys[]"]), timeout=30)
+    keys = [k.strip() for k in out.splitlines() if k.strip().startswith(("ssh-", "ecdsa-"))]
+    if rc != 0 or not keys:
+        return
+    path = os.path.join(user_home(), ".ssh", "known_hosts")
+    lines = []
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    missing = [f"{GH_HOST} {k}" for k in keys if f"{GH_HOST} {k}" not in lines]
+    if missing:
+        write_user_file(path, "\n".join(lines + missing) + "\n", mode=0o644)
+
+
+def github_ssh_ok():
+    """True when GitHub accepts the container's SSH key."""
+    _, out = run(as_user(["ssh", "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+                          "git@" + GH_HOST]), timeout=30)
+    return "successfully authenticated" in out
+
+
+GITHUB_INTRO = """
+GitHub-Anmeldung
+----------------
+Du bist in clawbook noch nicht bei GitHub angemeldet. Die Anmeldung brauchst
+du für Git: Damit holst du Kurs-Repositorys und lädst deine Arbeit hoch.
+Der WorkspaceManager (wsm) übernimmt deinen GitHub-Namen aus dieser Anmeldung.
+
+So läuft es ab (gh fragt auf Englisch):
+  - „Upload your SSH public key to your GitHub account?“
+    → wähle /home/student/.ssh/id_ed25519.pub
+  - „Title for your SSH key“ → Enter genügt
+  - gh zeigt einen Code wie ABCD-1234. Drücke Enter, öffne dann
+    https://github.com/login/device im Browser unter Windows,
+    melde dich bei GitHub an und gib den Code ein.
+"""
+
+GITHUB_SSH_HINT = """\
+Hinweis: GitHub kennt den SSH-Schlüssel dieses Containers noch nicht. Git über
+SSH (so arbeitet wsm) klappt erst danach. Hinterlegen mit:
+  gh auth refresh -s admin:public_key
+  gh ssh-key add ~/.ssh/id_ed25519.pub --title clawbook"""
+
+
+def github_login():
+    """Runs the gh login (device code in the browser). True when logged in."""
+    env = dict(os.environ)
+    if not in_vscode():
+        # No browser reachable from an SSH terminal (a browser in the RDP
+        # session would stay unseen): gh only prints the address.
+        env["GH_BROWSER"] = "echo Adresse für den Browser unter Windows:"
+    cmd = as_user(["gh", "auth", "login", "--hostname", GH_HOST, "--git-protocol", "ssh",
+                   "--web", "--insecure-storage"])
+    print()
+    try:
+        rc = subprocess.run(cmd, env=env, check=False).returncode
+    except KeyboardInterrupt:
+        print("\nGitHub-Anmeldung abgebrochen.")
+        return False
+    except OSError as e:
+        print(f"gh ließ sich nicht starten: {e}")
+        return False
+    state = github_state()
+    if rc != 0 or not state["angemeldet"]:
+        print("Die GitHub-Anmeldung hat nicht geklappt. Du kannst sie im Menü wiederholen.")
+        return False
+    run(as_user(["gh", "auth", "setup-git"]), timeout=30)
+    github_known_hosts()
+    print()
+    print(f"Bei GitHub angemeldet als {state['benutzer'] or 'unbekannt'}.")
+    if not github_ssh_ok():
+        print(GITHUB_SSH_HINT)
+    return True
+
+
+def github_offer(for_wsm=False):
+    """Explains the GitHub login and lets the student start or cancel it.
+    True when gh is logged in afterwards."""
+    print(GITHUB_INTRO)
+    print("  1  Jetzt bei GitHub anmelden (empfohlen)")
+    if for_wsm:
+        print("  2  Abbrechen")
+    else:
+        print("  2  Abbrechen – weiter zum Menü (beim nächsten Start frage ich wieder)")
+    while True:
+        try:
+            choice = input("Deine Wahl [1]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if choice in ("", "1"):
+            return github_login()
+        if choice in ("2", "0", "q", "x"):
+            return False
+        print("Bitte 1 oder 2 eingeben.")
+
+
+def cmd_github(opts, args):
+    if args == ["status"]:
+        state = github_state()
+        if opts["json"]:
+            sys.stdout.write(dump_json(state))
+            return 0 if state["angemeldet"] else 1
+        github_show(state)
+        return 0 if state["angemeldet"] else 1
+    if args == ["login"]:
+        if opts["json"] or not is_terminal():
+            raise CliError("Die GitHub-Anmeldung braucht ein Terminal: clawbook github login",
+                           code=2)
+        if opts["vor_wsm"]:
+            return github_before_wsm()
+        state = github_state()
+        if state["angemeldet"]:
+            github_show(state)
+            return 0
+        return 0 if github_offer() else 1
+    raise CliError("Aufruf: clawbook github status [--json] | clawbook github login", code=2)
+
+
+def github_show(state=None):
+    """Menu item and "clawbook github status": what gh says."""
+    if state is None:
+        state = github_state()
+    if not state["angemeldet"]:
+        print("GitHub: nicht angemeldet. Anmelden mit: clawbook github login")
+        return
+    if not state["geprueft"]:
+        print("GitHub: Anmeldung gespeichert, aber GitHub ist gerade nicht erreichbar.")
+        return
+    print(f"GitHub: angemeldet als {state['benutzer'] or 'unbekannt'}")
+    print("  SSH-Schlüssel bei GitHub: "
+          + ("hinterlegt" if github_ssh_ok() else "nicht hinterlegt"))
+    _, out = run(as_user(["gh", "auth", "status", "--hostname", GH_HOST]), timeout=20)
+    for line in out.splitlines():
+        if line.strip():
+            print("  " + line.rstrip())
+
+
+def github_before_wsm():
+    """Called by the wsm wrapper before wsm creates ~/.workspacemanager.yml.
+    Exit code 0: go on with wsm, 1: stop."""
+    if github_state()["angemeldet"]:
+        return 0
+    print()
+    print("wsm (WorkspaceManager) richtet sich jetzt zum ersten Mal ein und")
+    print("übernimmt dabei deinen GitHub-Namen. Melde dich deshalb zuerst bei GitHub an.")
+    if github_offer(for_wsm=True):
+        print()
+        return 0
+    print()
+    print("Ohne GitHub-Anmeldung fragt wsm gleich nach deinem GitHub-Namen und trägt")
+    print("ohne Eingabe „student“ in ~/.workspacemanager.yml ein. Das ist dann falsch")
+    print("und muss später von Hand geändert werden.")
+    if ask_yes("Trotzdem mit wsm fortfahren?"):
+        return 0
+    print("wsm nicht gestartet. Anmelden mit: clawbook github login")
+    return 1
+
+
+# --- menu on login ---------------------------------------------------------
+
+def menu_off_path():
+    return os.path.join(state_dir(), MENU_OFF_FILE)
+
+
+def menu_on_login():
+    return not os.path.exists(menu_off_path())
+
+
+def set_menu_on_login(enabled):
+    path = menu_off_path()
+    if enabled:
+        if os.path.exists(path):
+            try:
+                os.unlink(path)
+            except PermissionError:
+                rc, out = run(["sudo", "-n", "rm", "-f", path])
+                if rc != 0:
+                    raise CliError(f"Kann {path} nicht löschen: {out.strip()}")
+        print("Das Menü öffnet sich wieder, wenn du dich per SSH anmeldest.")
+    else:
+        write_user_file(path, "Menü beim Anmelden per SSH abgeschaltet "
+                              "(wieder einschalten: clawbook, Menü).\n")
+        print("Das Menü öffnet sich beim Anmelden per SSH nicht mehr.")
+        print("Du öffnest es jederzeit mit: clawbook")
+
+
 # --- interactive menu ------------------------------------------------------
 
 MENU = """
 clawbook - Menü
+  GitHub: {github}
   1  Status
   2  Werkzeuge prüfen
   3  Schlüssel anzeigen
   4  Stand anzeigen
   5  Stand schreiben (~/.clawbook/stand.json)
   6  Pakete und Kurse (noch nicht verfügbar)
+  7  {github_item}
+  8  {login_item}
   0  Beenden"""
 
 
 def plain(**kw):
-    opts = {"json": False, "quiet": False, "private": False, "yes": False, "write": False}
+    opts = {"json": False, "quiet": False, "private": False, "yes": False, "write": False,
+            "vor_wsm": False}
     opts.update(kw)
     return opts
+
+
+def github_label(state):
+    if not state["angemeldet"]:
+        return "nicht angemeldet"
+    if not state["geprueft"]:
+        return "angemeldet (GitHub gerade nicht erreichbar)"
+    return f"angemeldet als {state['benutzer'] or 'unbekannt'}"
 
 
 def menu_key():
@@ -608,6 +863,21 @@ def menu_key():
 
 
 def interactive():
+    terminal = is_terminal()
+    github = github_state() if terminal else {"angemeldet": False, "benutzer": None,
+                                              "geprueft": False}
+    # GitHub first: without a login git and wsm do not work properly.
+    if terminal and not github["angemeldet"] and github_offer():
+        github = github_state()
+
+    def menu_github():
+        nonlocal github
+        if github["angemeldet"]:
+            github_show()
+        else:
+            github_login()
+        github = github_state()
+
     actions = {
         "1": lambda: cmd_status(plain()),
         "2": lambda: cmd_check(plain()),
@@ -615,9 +885,15 @@ def interactive():
         "4": lambda: cmd_stand(plain()),
         "5": lambda: cmd_stand(plain(write=True)),
         "6": lambda: cmd_pakete(plain()),
+        "7": menu_github,
+        "8": lambda: set_menu_on_login(not menu_on_login()),
     }
     while True:
-        print(MENU)
+        print(MENU.format(
+            github=github_label(github),
+            github_item="GitHub-Anmeldung prüfen" if github["angemeldet"] else "GitHub anmelden",
+            login_item=("Menü beim Anmelden per SSH nicht mehr zeigen" if menu_on_login()
+                        else "Menü beim Anmelden per SSH wieder zeigen")))
         try:
             choice = input("Deine Wahl: ").strip()
         except (EOFError, KeyboardInterrupt):
@@ -643,7 +919,7 @@ def interactive():
 # --- command line ----------------------------------------------------------
 
 FLAGS = {"--json": "json", "--quiet": "quiet", "-q": "quiet", "--private": "private",
-         "--yes": "yes", "-y": "yes", "--write": "write"}
+         "--yes": "yes", "-y": "yes", "--write": "write", "--vor-wsm": "vor_wsm"}
 
 
 def version_text():
@@ -670,6 +946,8 @@ def dispatch(words, opts):
         return cmd_kurs(opts, args)
     if cmd == "pakete":
         return cmd_pakete(opts)
+    if cmd == "github":
+        return cmd_github(opts, args)
     raise CliError(f"Unbekannter Befehl: {' '.join(words)} (Hilfe: clawbook --help)",
                    code=2)
 
