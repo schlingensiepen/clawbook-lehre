@@ -1401,7 +1401,7 @@ function Get-LastPack {
 
 function Get-ShortcutOwner([string]$Path) {
   # Pack id a start menu entry of this script starts; entries without -Kurs
-  # (before DEC-060) belong to the base pack. '' for a foreign entry.
+  # (from older versions) belong to the base pack. '' for a foreign entry.
   try {
     $a = "$((New-Object -ComObject WScript.Shell).CreateShortcut($Path).Arguments)"
   } catch { return '' }
@@ -1911,7 +1911,7 @@ function Show-Menu {
 Log "=== clawbook.ps1 Action='$Action' Image='$Image' Ref='$Ref'"
 if ($Ref -notmatch '^[A-Za-z0-9._/-]+$') { Fail "CLAWBOOK_REF enthält unzulässige Zeichen: $Ref" }
 Say "Protokoll: $LogFile" 'DarkGray'
-# The single course id of DEC-054 is replaced by one pack per course.
+# The former single course id is replaced by one pack per course.
 if (Test-Path -LiteralPath $CourseFile) {
   Log 'kurs.txt wird nicht mehr gebraucht und entfernt'
   Remove-Item -Force -LiteralPath $CourseFile -ErrorAction SilentlyContinue
