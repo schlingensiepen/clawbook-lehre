@@ -195,6 +195,7 @@ RUN chmod 0755 /etc/cont-init.d/10-clawbook /etc/services.d/*/run \
  && chmod 0644 /etc/profile.d/zz-clawbook-menu.sh /etc/profile.d/clawbook-secrets.sh \
                /usr/share/keyrings/clawbook-apt.gpg \
                /etc/apt/sources.list.d/clawbook.sources /etc/apt/apt.conf.d/zz-clawbook-cache \
+               /etc/dpkg/dpkg.cfg.d/zz-clawbook-doc \
  && chmod -R a+rX /usr/share/clawbook \
  && { printf '%s\n' '# clawbook: keys for the agent tools (clawbook agenten schluessel); before' \
         '# the interactive check, because bash run by sshd for "ssh host <cmd>"' \

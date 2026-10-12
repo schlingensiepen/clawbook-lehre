@@ -1,0 +1,7 @@
+# The slim Debian base image keeps no files below /usr/share/doc except the
+# copyright files (dpkg.cfg.d/docker). The user documentation of the
+# clawbook packages (technology packages and courses) is wanted: it is what
+# "clawbook pakete info <name>" shows. This file is read after "docker",
+# so these rules win.
+path-include /usr/share/doc/clawbook-*/README.md
+path-include /usr/share/doc/kurs-*/README.md

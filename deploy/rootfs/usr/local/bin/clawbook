@@ -25,6 +25,8 @@ the exit code tells success (0) or failure (non-zero).
     clawbook pakete katalog         technology and course packages (clawbook-apt)
     clawbook pakete add|remove <name...> [--yes] [--vorladen]
     clawbook pakete vorladen        PlatformIO platform for ESP32 (pioarduino)
+    clawbook pakete info <name>     user documentation of a package (README
+                                    in the package, else its online address)
     clawbook wiederherstellen       install packages from stand.json again
                                     (--pruefen: cont-init, --dienst: service,
                                     which then also runs "agenten sync")
@@ -96,6 +98,11 @@ RESTORE_LOG = "restore.log"
 PIO_PLATFORM_URL = ("https://github.com/pioarduino/platform-espressif32/"
                     "releases/download/stable/platform-espressif32.zip")
 PIO_PACKAGES = ("kurs-iot", "clawbook-embedded")
+# User documentation of a package: shipped in the package, and online at a
+# fixed address in the clawbook-apt repository.
+PACKAGE_DOC_PATH = "/usr/share/doc/{name}/README.md"
+PACKAGE_DOC_URL = ("https://github.com/schlingensiepen/clawbook-apt/blob/main/"
+                   "packages/{name}/README.md")
 GH_HOST = "github.com"
 # Marker in ~/.clawbook: do not open the menu on SSH login. Same name in
 # /etc/profile.d/zz-clawbook-menu.sh.
@@ -187,6 +194,9 @@ Aufruf:
                                    entfernt sie wieder
   clawbook pakete vorladen [--json]
                                    PlatformIO für ESP32 vorladen (ca. 6 GB)
+  clawbook pakete info <name> [--json]
+                                   Doku zu einem Kurs oder Technikpaket
+                                   (im Paket; sonst die Adresse im Netz)
   clawbook wiederherstellen [--json]
                                    Pakete aus ~/.clawbook/stand.json erneut
                                    einspielen (läuft nach einem neuen Image
@@ -1244,9 +1254,54 @@ def cmd_pakete_vorladen(opts):
     return 0 if result["ok"] else 1
 
 
+def package_doc(name):
+    """User documentation of a package: the README in the installed package
+    (None when absent) and the online address (always)."""
+    path = PACKAGE_DOC_PATH.format(name=name)
+    return {"paket": name, "pfad": path if os.path.isfile(path) else None,
+            "url": PACKAGE_DOC_URL.format(name=name)}
+
+
+def show_text_file(path):
+    """Shows a text file: through less on a terminal, else plain on stdout."""
+    pager = shutil.which("less")
+    if pager and is_terminal():
+        sys.stdout.flush()
+        if subprocess.run([pager, "-FRX", path], check=False).returncode == 0:
+            return
+    with open(path, encoding="utf-8", errors="replace") as f:
+        sys.stdout.write(f.read())
+
+
+def cmd_pakete_info(opts, names):
+    if len(names) != 1:
+        raise CliError("Aufruf: clawbook pakete info <name> [--json]", code=2)
+    check_names(names, "info")
+    name = names[0]
+    doc = package_doc(name)
+    if doc["pfad"] is None:
+        # Not installed: only known packages get an address (no apt update
+        # here; the catalog may be empty before the first one).
+        known = {p["name"] for p in catalog_packages()} | {p["name"] for p in installed_packages()}
+        if known and name not in known:
+            raise CliError(f"„{name}“ gibt es in der Paketquelle nicht "
+                           "(alle Pakete zeigt: clawbook pakete katalog).")
+    if opts["json"]:
+        sys.stdout.write(dump_json(doc))
+        return 0
+    if doc["pfad"]:
+        show_text_file(doc["pfad"])
+        print()
+        print(f"Diese Doku liegt in {doc['pfad']}; im Netz: {doc['url']}")
+    else:
+        print(f"{name} ist nicht installiert (oder bringt noch keine Doku mit).")
+        print(f"Die Doku steht im Netz: {doc['url']}")
+    return 0
+
+
 def cmd_pakete(opts, args):
     usage = ("Aufruf: clawbook pakete katalog | add <name...> | remove <name...> | vorladen "
-             "[--yes] [--vorladen] [--json]")
+             "| info <name> [--yes] [--vorladen] [--json]")
     if not args:
         if opts["json"] or not is_terminal():
             raise CliError(usage, code=2)
@@ -1261,6 +1316,8 @@ def cmd_pakete(opts, args):
         return cmd_pakete_remove(opts, rest)
     if sub == "vorladen" and not rest:
         return cmd_pakete_vorladen(opts)
+    if sub == "info":
+        return cmd_pakete_info(opts, rest)
     raise CliError(usage, code=2)
 
 
@@ -4082,8 +4139,9 @@ def restore_menu_line():
 
 
 def menu_choose_packages(cat, art, heading, hint):
-    """Lists the packages of one kind; a number adds or removes one.
-    Returns "t" for the technology submenu, None to go back."""
+    """Lists the packages of one kind; a number adds or removes one,
+    "d" plus a number shows its documentation. Returns a package, ("doku",
+    package), "t" for the technology submenu or None to go back."""
     items = [p for p in cat["pakete"] if p["art"] == art]
     print()
     print(heading)
@@ -4095,12 +4153,15 @@ def menu_choose_packages(cat, art, heading, hint):
     for i, p in enumerate(items, 1):
         mark = "[x]" if p["installiert"] else "[ ]"
         print(f"  {i:>2}  {mark} {p['name']:<22} {p['beschreibung']}")
+    print("   d  Doku anzeigen (d und Nummer, z. B. d1)")
     if art == "kurs":
         print("   t  Technikpakete einzeln (für Fortgeschrittene)")
     print("   Enter  zurück")
     while True:
         try:
             choice = input("Deine Wahl: ").strip().lower()
+            if choice == "d":
+                choice += input("Doku zu welcher Nummer? ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return None
@@ -4108,9 +4169,13 @@ def menu_choose_packages(cat, art, heading, hint):
             return None
         if choice == "t" and art == "kurs":
             return "t"
-        if choice.isdigit() and 1 <= int(choice) <= len(items):
-            return items[int(choice) - 1]
-        print("Bitte eine Nummer aus der Liste wählen (Enter: zurück).")
+        doku = choice.startswith("d")
+        number = choice[1:].strip() if doku else choice
+        if number.isdigit() and 1 <= int(number) <= len(items):
+            item = items[int(number) - 1]
+            return ("doku", item) if doku else item
+        print("Bitte eine Nummer aus der Liste wählen, für die Doku d und die Nummer "
+              "(Enter: zurück).")
 
 
 def menu_toggle(p):
@@ -4148,6 +4213,12 @@ def menu_pakete():
             continue
         if choice == "t":
             art = "technik"
+            continue
+        if isinstance(choice, tuple):
+            try:
+                cmd_pakete_info(plain(), [choice[1]["name"]])
+            except CliError as e:
+                print(f"Fehler: {e}")
             continue
         try:
             menu_toggle(choice)

@@ -133,12 +133,15 @@ Pakete und Kurse - Kurse
    1  [ ] kurs-inf               Kurs Ingenieurinformatik
    2  [ ] kurs-iot               Kurs IoT
    3  [ ] kurs-swe               Kurs Softwareengineering
+   d  Doku anzeigen (d und Nummer, z. B. d1)
    t  Technikpakete einzeln (für Fortgeschrittene)
    Enter  zurück
 Deine Wahl:
 ```
 
-Geben Sie die Nummer des Kurses ein und drücken Sie Enter.
+Geben Sie die Nummer des Kurses ein und drücken Sie Enter. Wollen Sie
+vorher wissen, was ein Kurs mitbringt, geben Sie `d` und seine Nummer
+ein (zum Beispiel `d1`); `clawbook` zeigt dann seine Doku.
 `clawbook` bestätigt die Wahl, zum Beispiel „kurs-inf
 hinzufügen (Kurs Ingenieurinformatik).", und übergibt an
 die Paketverwaltung von Debian (`apt`). Die zeigt, welche
@@ -364,6 +367,7 @@ Technikpakete einzeln (für Fortgeschrittene)
    2  [ ] clawbook-db-sqlite     SQLite: sqlite3 und SQLite-Explorer für VS Code
    3  [ ] clawbook-dotnet        .NET SDK 10.0 mit dotnet-ef
   …
+   d  Doku anzeigen (d und Nummer, z. B. d1)
    Enter  zurück
 ```
 
@@ -385,6 +389,7 @@ Dasselbe geht ohne Menü:
 clawbook pakete katalog                 # alle Kurse und Technikpakete
 clawbook pakete add clawbook-dotnet     # hinzufügen
 clawbook pakete remove clawbook-dotnet  # entfernen
+clawbook pakete info clawbook-dotnet    # Doku des Pakets
 clawbook kurse                          # installierte Kurse
 ```
 
@@ -465,18 +470,18 @@ Technikpakete:
 
 | Paket | Was es mitbringt | In den Kursen |
 |---|---|---|
-| `clawbook-python` | pytest und ruff für Python | — |
-| `clawbook-java` | Java (OpenJDK 25), Maven, Gradle 9 | über `clawbook-spring` in `kurs-inf`, `kurs-swe` |
-| `clawbook-spring` | Spring-Boot-CLI (`spring`), baut auf `clawbook-java` auf | `kurs-inf`, `kurs-swe` |
-| `clawbook-dotnet` | .NET SDK 10.0 mit `dotnet-ef` (Entity Framework) | `kurs-swe` |
-| `clawbook-db-postgres` | PostgreSQL 17 als Dienst (Abschnitt 9), `psql` | `kurs-swe` |
-| `clawbook-db-sqlite` | SQLite (`sqlite3`) | `kurs-inf`, `kurs-swe` |
-| `clawbook-webapi` | Web-APIs testen: `httpie`, `xh`, `hurl`, `curl` | alle drei |
-| `clawbook-modeling` | PlantUML (`plantuml`) und Graphviz | `kurs-swe` |
-| `clawbook-embedded` | PlatformIO (`pio`), `esptool`, pyserial | `kurs-iot` |
-| `clawbook-iot` | MQTT-Clients (`mosquitto_pub`, `mosquitto_sub`), paho-mqtt für Python | `kurs-iot` |
-| `clawbook-nodered` | Node-RED als Dienst (Abschnitt 9) | `kurs-iot` |
-| `clawbook-security` | `nmap`, `tshark` (Netzwerk mitschneiden ohne `sudo`), `gnupg` | `kurs-iot` |
+| [`clawbook-python`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-python/README.md) | pytest und ruff für Python | — |
+| [`clawbook-java`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-java/README.md) | Java (OpenJDK 25), Maven, Gradle 9 | über `clawbook-spring` in `kurs-inf`, `kurs-swe` |
+| [`clawbook-spring`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-spring/README.md) | Spring-Boot-CLI (`spring`), baut auf `clawbook-java` auf | `kurs-inf`, `kurs-swe` |
+| [`clawbook-dotnet`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-dotnet/README.md) | .NET SDK 10.0 mit `dotnet-ef` (Entity Framework) | `kurs-swe` |
+| [`clawbook-db-postgres`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-db-postgres/README.md) | PostgreSQL 17 als Dienst (Abschnitt 9), `psql` | `kurs-swe` |
+| [`clawbook-db-sqlite`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-db-sqlite/README.md) | SQLite (`sqlite3`) | `kurs-inf`, `kurs-swe` |
+| [`clawbook-webapi`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-webapi/README.md) | Web-APIs testen: `httpie`, `xh`, `hurl`, `curl` | alle drei |
+| [`clawbook-modeling`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-modeling/README.md) | PlantUML (`plantuml`) und Graphviz | `kurs-swe` |
+| [`clawbook-embedded`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-embedded/README.md) | PlatformIO (`pio`), `esptool`, pyserial | `kurs-iot` |
+| [`clawbook-iot`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-iot/README.md) | MQTT-Clients (`mosquitto_pub`, `mosquitto_sub`), paho-mqtt für Python | `kurs-iot` |
+| [`clawbook-nodered`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-nodered/README.md) | Node-RED als Dienst (Abschnitt 9) | `kurs-iot` |
+| [`clawbook-security`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/clawbook-security/README.md) | `nmap`, `tshark` (Netzwerk mitschneiden ohne `sudo`), `gnupg` | `kurs-iot` |
 
 Wo es passt, bringt ein Technikpaket die
 VS-Code-Erweiterungen für den Container mit, zum Beispiel
@@ -487,9 +492,22 @@ Kurse:
 
 | Kurs | Titel | Download (ungefähr) |
 |---|---|---|
-| `kurs-inf` | Ingenieurinformatik: Java mit Spring Boot, Web-APIs, SQLite | 0,8 GB |
-| `kurs-swe` | Softwareengineering: Java mit Spring Boot, .NET mit Entity Framework, PostgreSQL und SQLite, Web-APIs, Modellierung mit PlantUML | 1,7 GB |
-| `kurs-iot` | IoT: ESP32 mit PlatformIO und Arduino, MQTT, Node-RED, Netzwerkanalyse, Web-APIs | 0,35 GB, PlatformIO auf Wunsch etwa 6 GB |
+| [`kurs-inf`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/kurs-inf/README.md) | Ingenieurinformatik: Java mit Spring Boot, Web-APIs, SQLite | 0,8 GB |
+| [`kurs-swe`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/kurs-swe/README.md) | Softwareengineering: Java mit Spring Boot, .NET mit Entity Framework, PostgreSQL und SQLite, Web-APIs, Modellierung mit PlantUML | 1,7 GB |
+| [`kurs-iot`](https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/kurs-iot/README.md) | IoT: ESP32 mit PlatformIO und Arduino, MQTT, Node-RED, Netzwerkanalyse, Web-APIs | 0,35 GB, PlatformIO auf Wunsch etwa 6 GB |
+
+Ein Klick auf den Paketnamen öffnet seine Doku: was darin ist, ein
+erstes Beispiel zum Ausprobieren und Hilfe, wenn etwas nicht geht.
+Dieselbe Doku liegt im Paket; im Container zeigt sie
+
+```bash
+clawbook pakete info clawbook-java     # oder ein anderes Paket
+```
+
+Im Menü „Pakete und Kurse“ geben Sie dafür `d` und die Nummer ein,
+zum Beispiel `d1`. Längere Dokus blättern Sie mit der Leertaste
+weiter; `q` beendet die Anzeige. Ist das Paket nicht installiert,
+nennt `clawbook` die Adresse der Doku im Netz.
 
 Die aktuelle Liste mit Versionen zeigt im Container:
 

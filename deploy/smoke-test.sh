@@ -573,9 +573,16 @@ json_ok "${out}" 'd["aktualisiert"] and len(d["pakete"]) >= 15 and {"kurs-inf", 
   || fail "catalog does not show the 15 packages of clawbook-apt: ${out}"
 # "clawbook pakete" on a terminal opens the menu (courses first); Enter leaves.
 out=$(ssh_tty '\n' 'clawbook pakete; echo "rc=$?"')
-if ! has 'Pakete und Kurse - Kurse' || ! has 'kurs-inf' || ! has 'Technikpakete einzeln' || ! has 'rc=0'; then
+if ! has 'Pakete und Kurse - Kurse' || ! has 'kurs-inf' || ! has 'Technikpakete einzeln' \
+   || ! has 'Doku anzeigen' || ! has 'rc=0'; then
   fail "clawbook pakete did not open the package menu: ${out}"
 fi
+# Documentation of a package not yet installed: only the online address.
+out=$(ssh_run 'clawbook pakete info kurs-inf --json') || fail "clawbook pakete info kurs-inf --json failed: ${out}"
+json_ok "${out}" 'd["paket"] == "kurs-inf" and d["pfad"] is None and d["url"] == "https://github.com/schlingensiepen/clawbook-apt/blob/main/packages/kurs-inf/README.md"' \
+  || fail "clawbook pakete info before install: unexpected result: ${out}"
+rc=0; out=$(ssh_run 'clawbook pakete info clawbook-gibtsnicht --json') || rc=$?
+[ "${rc}" -ne 0 ] || fail "clawbook pakete info accepted an unknown package: ${out}"
 echo "catalog ok"
 start=$(date +%s)
 out=$(ssh_run 'clawbook pakete add kurs-inf --yes --json 2>/tmp/add.log') \
@@ -587,6 +594,12 @@ ssh_run 'java -version 2>&1 | grep -q "25\." && mvn -v >/dev/null && gradle --ve
   && spring --version && sqlite3 --version >/dev/null && http --version >/dev/null \
   && xh --version >/dev/null && hurl --version >/dev/null' >/dev/null \
   || fail "kurs-inf: Java, Spring, SQLite or the web API tools missing"
+# The packages bring their user documentation; "pakete info" shows it.
+out=$(ssh_run 'clawbook pakete info clawbook-java --json')
+json_ok "${out}" 'd["pfad"] == "/usr/share/doc/clawbook-java/README.md" and d["url"].endswith("/packages/clawbook-java/README.md")' \
+  || fail "clawbook pakete info clawbook-java: README missing in the package: ${out}"
+ssh_run 'clawbook pakete info kurs-inf' | grep -q 'Ingenieurinformatik' \
+  || fail "clawbook pakete info kurs-inf does not show the README"
 out=$(ssh_run 'clawbook kurse --json')
 json_ok "${out}" 'd["kurse"] == [{"kennung": "kurs-inf", "titel": "Ingenieurinformatik", "version": d["kurse"][0]["version"]}]' \
   || fail "clawbook kurse --json: kurs-inf missing: ${out}"
