@@ -71,7 +71,7 @@ APT_ENV = {"DEBIAN_FRONTEND": "noninteractive"}
 APT_LOCK = ["-o", "DPkg::Lock::Timeout=900"]
 RESTORE_JSON = "restore.json"
 RESTORE_LOG = "restore.log"
-# PlatformIO: ESP32 with the Arduino core 3.x from pioarduino (DEC-063).
+# PlatformIO: ESP32 with the Arduino core 3.x from pioarduino.
 PIO_PLATFORM_URL = ("https://github.com/pioarduino/platform-espressif32/"
                     "releases/download/stable/platform-espressif32.zip")
 PIO_PACKAGES = ("kurs-iot", "clawbook-embedded")
@@ -1024,7 +1024,7 @@ def cmd_pakete_remove(opts, names):
 # PlatformIO: the platform for ESP32 (pioarduino, Arduino core 3.x) with
 # toolchain and framework takes about 6 GB in ~/.platformio (measured: the
 # toolchains are kept twice, in packages/ and tools/). clawbook loads it
-# once after the course (DEC-063) by building a throwaway project, so
+# once after the course by building a throwaway project, so
 # that the first real build neither waits nor needs the network.
 
 PIO_INTRO = """
@@ -1796,7 +1796,7 @@ def menu_toggle(p):
 
 def menu_pakete():
     """Menu "Pakete und Kurse": courses first, single technology packages
-    as a submenu for advanced users (DEC-060)."""
+    as a submenu for advanced users."""
     print("Paketquellen werden aktualisiert ...", flush=True)
     cat = collect_catalog()
     art = "kurs"

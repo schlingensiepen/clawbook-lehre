@@ -73,10 +73,10 @@ $MarkBegin = '# >>> clawbook (verwaltet von clawbook.ps1 - nicht von Hand aender
 $MarkEnd = '# <<< clawbook'
 
 # VSCodePack: one portable VS Code per installed course plus the base pack
-# "clawbook" (DEC-054, DEC-060). The course description comes from the CLI
+# "clawbook". The course description comes from the CLI
 # in the container; the base pack falls back to the product repository.
 $PackRoot = Join-Path $AppDir 'vscode'
-# Former single course id (DEC-054); no longer used and removed on start.
+# Former single course id; no longer used and removed on start.
 $CourseFile = Join-Path $AppDir 'kurs.txt'
 # Id of the pack started last (default in the selection of menu [9]).
 $LastPackFile = Join-Path $PackRoot 'zuletzt.txt'
@@ -1911,9 +1911,9 @@ function Show-Menu {
 Log "=== clawbook.ps1 Action='$Action' Image='$Image' Ref='$Ref'"
 if ($Ref -notmatch '^[A-Za-z0-9._/-]+$') { Fail "CLAWBOOK_REF enthält unzulässige Zeichen: $Ref" }
 Say "Protokoll: $LogFile" 'DarkGray'
-# The single course id of DEC-054 is replaced by one pack per course (DEC-060).
+# The single course id of DEC-054 is replaced by one pack per course.
 if (Test-Path -LiteralPath $CourseFile) {
-  Log 'kurs.txt (DEC-054) wird nicht mehr gebraucht und entfernt'
+  Log 'kurs.txt wird nicht mehr gebraucht und entfernt'
   Remove-Item -Force -LiteralPath $CourseFile -ErrorAction SilentlyContinue
 }
 try {
