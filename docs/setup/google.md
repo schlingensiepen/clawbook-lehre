@@ -167,11 +167,16 @@ ab (Muster in der [Übersicht](README.md), Regel 2):
 
 ```bash
 read -rs KEY
-claude mcp add -s user stitch --transport http \
-  --header "X-Goog-Api-Key: $KEY" \
-  https://stitch.googleapis.com/mcp
+claude mcp add -s user --transport http stitch \
+  https://stitch.googleapis.com/mcp \
+  --header "X-Goog-Api-Key: $KEY"
 unset KEY
 ```
+
+Die Reihenfolge ist wichtig: `--header` steht am Ende.
+Davor geschrieben, hält Claude Code auch die Adresse
+für einen Header und bricht mit „missing required
+argument 'commandOrUrl'" ab.
 
 `-s user` heißt: gilt für alle deine Projekte;
 gespeichert in `~/.claude.json`. Mehr ist nicht zu tun:
@@ -215,6 +220,11 @@ Servers.
   Prüfe mit `echo $DISPLAY`; ist die Ausgabe leer,
   rufe `DISPLAY=:0 notebooklm login` auf oder nutze
   das Terminal-Symbol in der Leiste von Fenster B.
+- **`notebooklm login` meldet „Playwright not
+  installed"** → Das Image ist älter als die Korrektur
+  dieses Fehlers. Das Image aktualisieren
+  ([Pflege](../pflege.md), Abschnitt 3); selbst
+  nachinstallieren ist nicht nötig.
 - **Remote-Desktop meldet „Verbindung fehlgeschlagen"**
   → Läuft der Container? Die Adresse ist
   `localhost:3390`, nicht `3389`. Siehe

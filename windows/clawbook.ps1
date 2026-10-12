@@ -64,7 +64,7 @@ $KnownHosts = Join-Path $SshDir 'known_hosts_clawbook'
 $MarkBegin = '# >>> clawbook (verwaltet von clawbook.ps1 - nicht von Hand aendern)'
 $MarkEnd = '# <<< clawbook'
 
-# VSCodePack: portable VS Code per course id (DEC-054). The course
+# VSCodePack: portable VS Code per course id. The course
 # description comes from the product repository for now; course packages
 # will provide it from inside the container later.
 $PackRoot = Join-Path $AppDir 'vscode'
@@ -91,10 +91,11 @@ $LongWaitHint = 'Das kann einige Minuten dauern – bitte nicht abbrechen.'
 foreach ($d in @($AppDir, $LogDir, $UserDir, $ExchangeDir, $BackupDir, $SshDir)) {
   New-Item -ItemType Directory -Force -Path $d | Out-Null
 }
-# One log file per run (date and time in the name); keep the newest 30.
+# One log file per run (date and time in the name); together with the
+# file of this run the newest 30 remain.
 $LogFile = Join-Path $LogDir ("clawbook-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmm'))
 Get-ChildItem -LiteralPath $LogDir -Filter 'clawbook-*.log' -ErrorAction SilentlyContinue |
-  Sort-Object LastWriteTime -Descending | Select-Object -Skip 30 |
+  Sort-Object LastWriteTime -Descending | Select-Object -Skip 29 |
   Remove-Item -Force -ErrorAction SilentlyContinue
 $Utf8NoBom = New-Object Text.UTF8Encoding $false
 $WslcPath = 'wslc'
@@ -314,7 +315,8 @@ function Invoke-Pull($Name) {
     }
   }
   if ($lastOut) {
-    $tail = ($lastOut -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 5) -join "`n"
+    $clean = $lastOut -replace '\x1b\[[0-9;?]*[A-Za-z]', ''
+    $tail = ($clean -split '[\r\n]+' | Where-Object { $_.Trim() } | Select-Object -Last 5) -join "`n"
     Write-Host ("Meldung von wslc:`n" + $tail) -ForegroundColor DarkGray
   }
   Say 'Mögliche Ursachen: keine Internetverbindung, ein aktives VPN, ein Proxy oder eine Firewall der Hochschule.' 'Yellow'

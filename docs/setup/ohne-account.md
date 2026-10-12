@@ -44,6 +44,13 @@ installieren:
 playwright-cli install --skills
 ```
 
+Der Befehl legt den Skill im aktuellen Projektordner
+an (unter `.claude/skills/`) und dazu eine kleine
+Einstellungsdatei `.playwright/cli.config.json`, die
+Chromium als Browser einträgt. Führen Sie ihn also in
+dem Projekt aus, in dem der Agent den Browser nutzen
+soll.
+
 Danach reicht es, den Agenten zu bitten: „Öffne mit
 playwright-cli die Seite … und sag mir, was dort
 steht." (Den Agenten dürfen Sie duzen.) Von Hand sieht das so aus:
@@ -66,7 +73,15 @@ claude mcp add -s user playwright -- playwright-mcp --headless
 `--headless` heißt: ohne Fenster. Ohne diese Option
 würde Playwright ein Browserfenster auf dem Bildschirm
 des Containers öffnen — das ist nur zum Zuschauen per
-Remote-Desktop nützlich.
+Remote-Desktop nützlich. Dasselbe gilt für
+`playwright-cli open --headed …`: Das Fenster erscheint
+auf dem Bildschirm des Containers (siehe
+[Installation](../installation.md), Abschnitt 6).
+
+Beide Werkzeuge nähmen von sich aus Google Chrome, das
+im Image fehlt. Die Variable
+`PLAYWRIGHT_MCP_BROWSER=chromium` (im Image gesetzt)
+stellt sie auf das mitgelieferte Chromium um.
 
 ### Graphify: Wissensgraph aus Code und Dokumenten
 
@@ -230,13 +245,17 @@ In Claude Code zeigt `/mcp` den Playwright-Server und
   (`claude mcp remove -s user playwright`) und neu
   anlegen.
 - **Der Browser startet nicht („Executable doesn't
-  exist")** → Chromium für Playwright liegt im Image
-  unter `/opt/ms-playwright`. Diese Meldung erscheint,
-  wenn jemand `playwright install` im Home-Verzeichnis
-  ausgeführt oder die Variable
-  `PLAYWRIGHT_BROWSERS_PATH` überschrieben hat.
-  `env | grep PLAYWRIGHT` prüfen; der Wert muss
-  `/opt/ms-playwright` sein.
+  exist", „is not installed" oder „Chromium
+  distribution 'chrome' is not found")** → Chromium für
+  Playwright liegt im Image unter `/opt/ms-playwright`.
+  `env | grep PLAYWRIGHT` prüfen:
+  `PLAYWRIGHT_BROWSERS_PATH` muss `/opt/ms-playwright`
+  sein, `PLAYWRIGHT_MCP_BROWSER` muss `chromium` sein.
+  Fehlt die zweite Variable oder meldet
+  `playwright-cli install --skills` „permission denied"
+  für `/opt/ms-playwright`, ist das Image älter als die
+  Korrektur dieses Fehlers: Image aktualisieren
+  ([Pflege](../pflege.md), Abschnitt 3).
 - **`/graphify` fehlt in Claude Code** →
   `graphify install --platform claude` noch nicht
   ausgeführt, oder Claude Code lief dabei noch. Claude
