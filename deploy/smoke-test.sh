@@ -293,9 +293,13 @@ rc=0; out=$(docker exec "${NAME}" clawbook notebooklm --json) || rc=$?
 if [ "${rc}" != 1 ] || ! json_ok "${out}" 'd["zustand"] == "nicht_angemeldet"'; then
   fail "clawbook notebooklm --json as root: ${out}"
 fi
-out=$(ssh_tty '' 'clawbook notebooklm; echo "rc=$?"')
-if ! has 'notebooklm login' || ! has 'rc=1'; then
-  fail "clawbook notebooklm does not explain the login: ${out}"
+out=$(ssh_tty 'n\n' 'clawbook notebooklm; echo "rc=$?"')
+if ! has 'Jetzt anmelden' || ! has 'clawbook notebooklm anmelden' || ! has 'rc=1'; then
+  fail "clawbook notebooklm does not offer the login: ${out}"
+fi
+rc=0; out=$(ssh_run 'clawbook notebooklm anmelden --json') || rc=$?
+if [ "${rc}" != 2 ] || ! json_ok "${out}" '"fehler" in d'; then
+  fail "clawbook notebooklm anmelden --json did not refuse: ${out}"
 fi
 ssh_run 'mkdir -p ~/.notebooklm/profiles/default && cat > ~/.notebooklm/profiles/default/storage_state.json' <<'JSON'
 {"cookies": [
@@ -524,6 +528,53 @@ with sync_playwright() as p:
         b.close()
 PY
 echo "notebooklm browser ok"
+
+# NotebookLM login by clawbook, in its test mode (no network, Chromium on
+# display :0): a stale profile lock is removed with --yes; the time limit
+# without a login leaves the stored login alone; stand-in session cookies
+# are detected and saved (old file kept, cookies made fit by
+# notebooklm-fix-cookies) and classified locally.
+NLM_DIR=.notebooklm/profiles/default
+ssh_run "mkdir -p ~/${NLM_DIR}/browser_profile && echo '{\"cookies\": [], \"origins\": []}' > ~/${NLM_DIR}/storage_state.json && ln -s anderer-rechner-4242 ~/${NLM_DIR}/browser_profile/SingletonLock" \
+  || fail "could not prepare the NotebookLM profile"
+rc=0; out=$(ssh_run 'CLAWBOOK_NLM_TEST=leer clawbook notebooklm anmelden --yes --zeitgrenze=4') || rc=$?
+if [ "${rc}" != 1 ] || ! has 'veraltete Sperre ist entfernt' \
+   || ! has 'Innerhalb von 4 Sekunden wurde keine Anmeldung erkannt'; then
+  fail "clawbook notebooklm anmelden: time limit or lock not handled: ${out}"
+fi
+ssh_run "grep -qx '{\"cookies\": \[\], \"origins\": \[\]}' ~/${NLM_DIR}/storage_state.json && ! ls ~/${NLM_DIR}/storage_state.json.alt-* 2>/dev/null" \
+  || fail "clawbook notebooklm anmelden changed the stored login after the time limit"
+rc=0; out=$(ssh_run 'CLAWBOOK_NLM_TEST=cookies clawbook notebooklm anmelden --zeitgrenze=60') || rc=$?
+if [ "${rc}" != 0 ] || ! has 'Anmeldung erkannt' || ! has 'NotebookLM: angemeldet'; then
+  fail "clawbook notebooklm anmelden did not save the stand-in login: ${out}"
+fi
+ssh_run "/opt/uv-tools/notebooklm-py/bin/python - ~/${NLM_DIR}" <<'PY' || fail "NotebookLM login saved wrongly"
+import glob, json, os, stat, sys
+d = sys.argv[1]
+state = json.load(open(os.path.join(d, "storage_state.json")))
+have = {(c["name"], c["domain"]) for c in state["cookies"]}
+need = {("SID", ".google.com"), ("__Secure-1PSIDTS", ".google.com"),
+        ("OSID", "notebook.google.com"), ("OSID", "notebooklm.google.com")}
+assert need <= have, have
+assert stat.S_IMODE(os.stat(os.path.join(d, "storage_state.json")).st_mode) == 0o600
+old = glob.glob(os.path.join(d, "storage_state.json.alt-*"))
+assert len(old) == 1 and json.load(open(old[0])) == {"cookies": [], "origins": []}, old
+PY
+out=$(ssh_run 'clawbook check --json') || fail "clawbook check --json failed"
+json_ok "${out}" '[t.get("zustand") for t in d if t["name"] == "notebooklm-anmeldung"] == ["angemeldet"]' \
+  || fail "clawbook check --json: saved NotebookLM login not seen as angemeldet: ${out}"
+ssh_run "/opt/uv-tools/notebooklm-py/bin/python - ~/${NLM_DIR}/storage_state.json" <<'PY' || fail "could not edit the NotebookLM login"
+import json, sys
+p = sys.argv[1]
+s = json.load(open(p))
+s["cookies"] = [c for c in s["cookies"] if c["domain"] != "notebooklm.google.com"]
+json.dump(s, open(p, "w"))
+PY
+out=$(ssh_run 'clawbook check --json') || fail "clawbook check --json failed"
+json_ok "${out}" '[t.get("zustand") for t in d if t["name"] == "notebooklm-anmeldung"] == ["unvollstaendig"]' \
+  || fail "clawbook check --json: unfixed NotebookLM login not seen as unvollstaendig: ${out}"
+ssh_run 'rm -rf ~/.notebooklm'
+echo "notebooklm login ok"
 
 # Samba: share "student" is writable with the password the start shows.
 smb_pw=$(docker exec "${NAME}" cat /home/student/.clawbook/samba-password)

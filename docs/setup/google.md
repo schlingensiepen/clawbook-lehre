@@ -115,6 +115,20 @@ Abschnitt 6). Sie arbeiten mit zwei Fenstern:
 - **Fenster B** — die Remotedesktopverbindung, die
   den Bildschirm des Containers zeigt.
 
+**Das erledigt clawbook:** `clawbook notebooklm` (im
+clawbook-Menü Punkt **9**) prüft die Anmeldung. Fehlt
+sie, fragt es „Jetzt anmelden (Chromium-Fenster auf dem
+Remotedesktop)? [J/n]"; direkt geht es mit
+`clawbook notebooklm anmelden`. clawbook öffnet dann in
+Fenster B ein Chromium-Fenster mit der
+Google-Anmeldung, erkennt selbst, wann Sie angemeldet
+sind, speichert die Sitzung für das Werkzeug
+`notebooklm`, passt sie an die neue Adresse von
+NotebookLM an (Skript `notebooklm-fix-cookies`, siehe
+unten) und prüft sie mit einer Anfrage an NotebookLM.
+
+**Das tun Sie selbst:**
+
 1. **Unter Windows** (nicht im Container) Fenster B
    öffnen — in PowerShell:
 
@@ -128,55 +142,78 @@ Abschnitt 6). Sie arbeiten mit zwei Fenstern:
    es nicht. Fenster B zeigt einen leeren Bildschirm
    mit einer Leiste oben.
 
-2. In **Fenster A** die Anmeldung starten:
-
-   ```bash
-   notebooklm login
-   ```
-
-3. In **Fenster B** öffnet sich ein Chromium-Fenster
-   mit der Google-Anmeldung. Dort anmelden (E-Mail,
-   Passwort, Zwei-Faktor-Code), bis NotebookLM
-   geladen ist.
-
-4. Zurück in **Fenster A**: den Hinweisen des
-   Programms folgen — es speichert die Anmeldung und
-   beendet sich.
-
-5. In **Fenster A, immer danach:**
+2. In **Fenster A**:
 
    ```bash
    clawbook notebooklm
    ```
 
-   Der Befehl prüft die Anmeldung, auch mit einer
-   Anfrage an NotebookLM. Meldet er „Die Anmeldung ist
-   unvollständig", fragt er „Jetzt reparieren? [J/n]" —
-   drücken Sie Enter. Warum: Google hat NotebookLM auf
-   eine neue Adresse umgezogen (`notebook.google.com`),
-   das Kommandozeilen-Werkzeug erwartet die
-   Anmeldedaten aber noch unter der alten. Die
-   Reparatur ruft das Skript `notebooklm-fix-cookies`
-   auf, das sie umkopiert, und prüft danach erneut.
-   Ohne diesen Schritt meldet jeder Befehl
-   „Authentication expired", obwohl die Anmeldung
-   geklappt hat. Am Ende steht „NotebookLM: angemeldet
-   …; die Verbindung zu NotebookLM klappt."
-   (`notebooklm-fix-cookies` können Sie auch selbst
-   aufrufen.)
+   und die Frage nach der Anmeldung mit Enter
+   bestätigen. clawbook sagt: „Ich warte, bis die
+   Anmeldung erkannt ist (höchstens 5 Minuten;
+   Abbrechen mit Strg+C)."
 
-6. Fenster B können Sie schließen; das trennt nur die
+3. In **Fenster B** erscheint ein Chromium-Fenster
+   mit der Google-Anmeldung. Dort anmelden (E-Mail,
+   Passwort, Zwei-Faktor-Code). Sie müssen nichts
+   weiter tun: Sobald Google die Anmeldung bestätigt,
+   meldet Fenster A „Anmeldung erkannt", lädt kurz
+   NotebookLM, speichert und schließt das
+   Chromium-Fenster.
+
+4. Am Ende steht in Fenster A „NotebookLM: angemeldet
+   als …; die Verbindung zu NotebookLM klappt."
+   Fenster B können Sie schließen; das trennt nur die
    Anzeige.
 
-Die Anmeldung läuft nach einiger Zeit ab; dann die
-Schritte 1 bis 5 wiederholen. Ob Sie angemeldet sind,
-zeigt jederzeit `clawbook notebooklm` (auch Menüpunkt
-**9** im clawbook-Menü); ohne Anmeldung erklärt der
-Befehl diese Schritte in Kurzform. Auch `clawbook
-check` hat eine Zeile „NotebookLM" (angemeldet,
-unvollständig oder nicht angemeldet) — dort ohne
-Anfrage an NotebookLM, also auch ohne Internet. Die Daten liegen in
-`~/.notebooklm/` — nicht weitergeben.
+Gibt es nach 5 Minuten keine Anmeldung, bricht clawbook
+ab und ändert nichts; dasselbe nach Strg+C. Eine schon
+gespeicherte Anmeldung sichert clawbook vor dem
+Überschreiben (`storage_state.json.alt-<Zeit>` in
+`~/.notebooklm/profiles/default/`).
+
+Die Anmeldung läuft nach einiger Zeit ab; dann
+`clawbook notebooklm` wiederholen. Ob Sie angemeldet
+sind, zeigt jederzeit `clawbook notebooklm`. Auch
+`clawbook check` hat eine Zeile „NotebookLM"
+(angemeldet, unvollständig oder nicht angemeldet) —
+dort ohne Anfrage an NotebookLM, also auch ohne
+Internet. Die Daten liegen in `~/.notebooklm/` — nicht
+weitergeben.
+
+Warum die Anpassung an die neue Adresse: Google hat
+NotebookLM auf `notebook.google.com` umgezogen, das
+Kommandozeilen-Werkzeug erwartet die Anmeldedaten aber
+noch unter der alten Adresse. Ohne die Anpassung meldet
+jeder Befehl „Authentication expired", obwohl die
+Anmeldung geklappt hat. Meldet `clawbook notebooklm`
+„Die Anmeldung ist unvollständig" und fragt „Jetzt
+reparieren? [J/n]", drücken Sie Enter.
+
+**Falls die Automatik nicht geht:** von Hand mit dem
+Werkzeug selbst. Bekanntes Problem: `notebooklm login`
+hält die Startseite von `notebook.google.com` für
+„angemeldet", meldet „Already logged in" und speichert
+keine Google-Sitzung. So geht es trotzdem:
+
+1. Fenster B öffnen (siehe oben).
+2. In Fenster A Chromium mit dem Browserprofil von
+   `notebooklm` auf der Google-Anmeldung öffnen (die
+   erste Zeile sucht das Chromium, das `notebooklm`
+   benutzt):
+
+   ```bash
+   CHROME=$(/opt/uv-tools/notebooklm-py/bin/python -c 'from playwright.sync_api import sync_playwright as s; p = s().start(); print(p.chromium.executable_path); p.stop()')
+   DISPLAY=:0 "$CHROME" \
+     --user-data-dir="$HOME/.notebooklm/profiles/default/browser_profile" \
+     https://accounts.google.com/
+   ```
+
+3. In Fenster B anmelden, dann das Chromium-Fenster
+   schließen.
+4. In Fenster A `notebooklm login` aufrufen; danach
+   `notebooklm-fix-cookies` und zur Prüfung
+   `clawbook notebooklm`.
 
 ### Stitch für alle Agenten
 
@@ -283,21 +320,28 @@ echter Entwurf zeigt es.
 
 - **`notebooklm list` meldet „Authentication expired",
   obwohl Sie sich gerade angemeldet haben** →
-  Schritt 5 vergessen. `clawbook notebooklm` aufrufen
-  und die Reparatur bestätigen. Meldet der Befehl
-  danach weiter „unvollständig oder abgelaufen",
-  melden Sie sich neu an (Schritte 1 bis 5).
-- **`notebooklm login` öffnet kein Fenster in
-  Fenster B** → Normalerweise weiß das Terminal über
-  die Variable `DISPLAY=:0`, wo der Bildschirm ist.
-  Prüfen Sie mit `echo $DISPLAY`; ist die Ausgabe leer,
-  rufen Sie `DISPLAY=:0 notebooklm login` auf oder nutzen Sie
-  das Terminal-Symbol in der Leiste von Fenster B.
-- **`notebooklm login` meldet „Playwright not
-  installed"** → Das Image ist älter als die Korrektur
-  dieses Fehlers. Das Image aktualisieren
-  ([Pflege](../pflege.md), Abschnitt 3); selbst
-  nachinstallieren ist nicht nötig.
+  `clawbook notebooklm` aufrufen und die Reparatur
+  bestätigen. Meldet der Befehl danach weiter
+  „unvollständig oder abgelaufen", melden Sie sich neu
+  an; hilft auch das nicht, mit zurückgesetztem
+  Browserprofil: `clawbook notebooklm anmelden --neu`.
+- **`clawbook notebooklm anmelden` meldet „Kein
+  Bildschirm erreichbar"** → Der Bildschirm des
+  Containers läuft nicht. `clawbook status` zeigt, ob
+  `weston` läuft; sonst den Container neu starten
+  ([Pflege](../pflege.md)).
+- **`clawbook notebooklm anmelden` meldet „Das
+  Browserprofil von NotebookLM ist belegt"** → Ein
+  Chromium-Fenster einer früheren Anmeldung ist noch
+  offen. clawbook bietet an, es zu schließen (bzw. eine
+  veraltete Sperre zu entfernen); mit Enter bestätigen.
+- **Kein Chromium-Fenster in Fenster B** → Fenster B
+  erst nach dem Start geöffnet? Das Fenster ist trotzdem
+  da; sonst Fenster B schließen und neu verbinden.
+- **`notebooklm login` sagt „Already logged in", aber
+  `clawbook notebooklm` meldet „unvollständig"** → Das
+  bekannte Problem von `notebooklm login`. Melden Sie
+  sich mit `clawbook notebooklm anmelden` an.
 - **Remote-Desktop meldet „Verbindung fehlgeschlagen"**
   → Läuft der Container? Die Adresse ist
   `localhost:3390`, nicht `3389`. Siehe

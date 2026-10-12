@@ -3,7 +3,8 @@
 
 Google moved NotebookLM from notebooklm.google.com to notebook.google.com.
 The CLI (notebooklm-py) still expects the old domain. Run this script
-after every `notebooklm login`.
+after every `notebooklm login`; "clawbook notebooklm anmelden" runs it
+itself.
 """
 
 import json
@@ -32,7 +33,7 @@ def fix_cookies(path):
     nb = {c["name"]: c for c in cookies if c.get("domain") == "notebook.google.com"}
 
     if not nb:
-        print("No notebook.google.com cookies found - run `notebooklm login` first.")
+        print("No notebook.google.com cookies found - run `clawbook notebooklm anmelden` first.")
         return False
 
     updated = 0

@@ -19,7 +19,11 @@ the exit code tells success (0) or failure (non-zero).
     clawbook github identitaet      git user.name/user.email from the GitHub
                                     account (asks; --json only reports)
     clawbook notebooklm [--yes]     NotebookLM login state; offers the cookie
-                                    fix when the login is incomplete
+                                    fix when the login is incomplete and the
+                                    login when it is still missing
+    clawbook notebooklm anmelden [--neu] [--zeitgrenze=SEK]
+                                    NotebookLM login: Chromium on the remote
+                                    desktop, the session is saved for notebooklm
     clawbook wsm status|erneuern    detect an outdated wsm configuration
                                     (single location ~/source) and renew it
     clawbook pakete katalog         technology and course packages (clawbook-apt)
@@ -63,6 +67,7 @@ import pwd
 import re
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -180,7 +185,13 @@ Aufruf:
                                    übernehmen (--json zeigt nur den Vorschlag)
   clawbook notebooklm [--yes] [--json]
                                    NotebookLM-Anmeldung prüfen, unvollständige
-                                   Anmeldung reparieren (notebooklm-fix-cookies)
+                                   Anmeldung reparieren (notebooklm-fix-cookies),
+                                   fehlende Anmeldung anbieten
+  clawbook notebooklm anmelden [--neu] [--zeitgrenze=SEK] [--yes]
+                                   bei NotebookLM anmelden: Chromium-Fenster auf
+                                   dem Remotedesktop, clawbook erkennt die
+                                   Anmeldung und speichert sie (--neu: Browser-
+                                   profil vorher zurücksetzen)
   clawbook wsm status [--json]     ist die wsm-Konfiguration veraltet?
   clawbook wsm erneuern [--yes] [--json]
                                    neue Standard-Konfiguration für wsm
@@ -2152,13 +2163,160 @@ NLM_NETWORK_RE = re.compile(
     re.IGNORECASE)
 
 NLM_LOGIN = """\
-So melden Sie sich an:
-  1. Unter Windows den Bildschirm des Containers öffnen (Remotedesktop),
-     zum Beispiel in PowerShell: mstsc /v:localhost:3390
-  2. Hier im Terminal eingeben: notebooklm login
-  3. Im Chromium-Fenster auf dem Remotedesktop bei Google anmelden, bis
-     NotebookLM geladen ist; dann den Hinweisen im Terminal folgen.
-  4. Danach prüfen (und wenn nötig reparieren): clawbook notebooklm"""
+So melden Sie sich an: clawbook notebooklm anmelden
+  (im clawbook-Menü Punkt 9). clawbook öffnet auf dem Bildschirm des
+  Containers ein Chromium-Fenster mit der Google-Anmeldung; öffnen Sie dazu
+  unter Windows den Remotedesktop, zum Beispiel in PowerShell:
+  mstsc /v:localhost:3390"""
+
+# "clawbook notebooklm anmelden": notebooklm-py 0.8.4 takes the start page
+# of notebook.google.com for "logged in" ("notebooklm login" then says
+# "Already logged in" and stores no Google session). clawbook therefore
+# opens Chromium itself, with the browser profile of notebooklm, on the
+# Google sign-in, waits for the session cookies and saves the session as
+# notebooklm's storage_state.json (Playwright format).
+NLM_PYTHON = "/opt/uv-tools/notebooklm-py/bin/python"
+NLM_DISPLAY = ":0"
+NLM_LOGIN_TIMEOUT = 300
+# Test mode for the smoke test (never touches the network): "cookies" puts
+# stand-in session cookies into the browser, "leer" waits without any.
+NLM_TEST_ENV = "CLAWBOOK_NLM_TEST"
+NLM_LOGIN_SCRIPT = r'''
+import datetime, json, os, sys, time
+from pathlib import Path
+
+REQUIRED = ("SID", "__Secure-1PSIDTS")
+START_URL = ("https://accounts.google.com/ServiceLogin?continue="
+             "https%3A%2F%2Fnotebook.google.com%2F")
+TARGET_URL = "https://notebook.google.com/"
+TARGET_HOST = "notebook.google.com"
+
+
+def paths():
+    try:
+        from notebooklm.paths import get_browser_profile_dir, get_storage_path
+        return Path(get_storage_path()), Path(get_browser_profile_dir())
+    except Exception:
+        base = Path.home() / ".notebooklm" / "profiles" / "default"
+        return base / "storage_state.json", base / "browser_profile"
+
+
+def session(cookies):
+    """Values of the required cookies of .google.com (None when one is missing)."""
+    found = {c.get("name"): c.get("value") for c in cookies
+             if c.get("domain") in (".google.com", "google.com") and c.get("name") in REQUIRED}
+    return tuple(found.get(n) for n in REQUIRED) if all(found.get(n) for n in REQUIRED) else None
+
+
+def on_target(context):
+    for page in context.pages:
+        try:
+            if page.url.split("/")[2:3] == [TARGET_HOST]:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def save(context, storage):
+    storage.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    backup = None
+    if storage.exists():
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup = storage.with_name(storage.name + ".alt-" + stamp)
+        os.replace(storage, backup)
+    state = context.storage_state()
+    tmp = storage.with_name(storage.name + ".neu")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+    os.replace(tmp, storage)
+    return backup
+
+
+def main():
+    args = sys.argv[1:]
+    storage, profile = paths()
+    if args[:1] == ["--pfade"]:
+        print(json.dumps({"storage": str(storage), "profil": str(profile)}))
+        return 0
+    limit = int(args[0]) if args else 300
+    test = os.environ.get("CLAWBOOK_NLM_TEST", "")
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
+    profile.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with sync_playwright() as p:
+        try:
+            context = p.chromium.launch_persistent_context(
+                user_data_dir=str(profile), headless=False,
+                args=["--disable-blink-features=AutomationControlled",
+                      "--password-store=basic"],
+                ignore_default_args=["--enable-automation"])
+        except PlaywrightError as e:
+            print("Chromium ließ sich nicht starten: " + str(e).strip().splitlines()[0])
+            return 4
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            before = session(context.cookies())
+            if test == "cookies":
+                stand_in = {"value": "clawbook-test", "path": "/", "secure": True,
+                            "httpOnly": True, "sameSite": "Lax", "expires": -1}
+                context.add_cookies([dict(stand_in, name=n, domain=".google.com")
+                                     for n in REQUIRED]
+                                    + [dict(stand_in, name="OSID", domain=TARGET_HOST)])
+            if test:
+                page.goto("data:text/html,<title>clawbook-test</title>NotebookLM-Test")
+            else:
+                try:
+                    page.goto(START_URL, wait_until="commit", timeout=60000)
+                except PlaywrightError as e:
+                    if "closed" in str(e).lower():
+                        raise
+                    print("Die Google-Anmeldung ließ sich nicht laden (ohne Internet?): "
+                          + str(e).strip().splitlines()[0], flush=True)
+            deadline = time.monotonic() + limit
+            while True:
+                now = session(context.cookies())
+                # A session that was already in the profile counts only when
+                # it changed or Google sent the browser on to NotebookLM.
+                if now and (before is None or now != before or on_target(context)):
+                    break
+                if time.monotonic() >= deadline:
+                    print("Keine Anmeldung erkannt (Zeitgrenze erreicht).")
+                    return 3
+                time.sleep(2)
+            print("Anmeldung erkannt. Ich öffne NotebookLM und speichere die Sitzung ...",
+                  flush=True)
+            if not test:
+                try:
+                    page.goto(TARGET_URL, wait_until="commit", timeout=30000)
+                    page.wait_for_load_state("domcontentloaded", timeout=30000)
+                except PlaywrightError:
+                    pass
+                time.sleep(3)
+            backup = save(context, storage)
+            print("Gespeichert: " + str(storage))
+            if backup:
+                print("Die alte Datei ist gesichert als " + str(backup))
+            return 0
+        except PlaywrightError as e:
+            if "closed" in str(e).lower():
+                print("Das Chromium-Fenster wurde geschlossen, bevor die Anmeldung erkannt war.")
+                return 5
+            raise
+        except KeyboardInterrupt:
+            return 130
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+
+
+try:
+    sys.exit(main())
+except KeyboardInterrupt:
+    sys.exit(130)
+'''
 
 
 def notebooklm_storage():
@@ -2283,7 +2441,229 @@ def cmd_notebooklm(opts):
               + " Melden Sie sich neu an.")
     else:
         print(f"NotebookLM: Zustand unbekannt ({state['meldung']}).")
+    if is_terminal() and ask_yes_default(
+            "Jetzt anmelden (Chromium-Fenster auf dem Remotedesktop)?"):
+        return notebooklm_login(opts)
     print(NLM_LOGIN)
+    return 1
+
+
+NLM_FALLBACK = """Falls die Automatik nicht geht: Anleitung „NotebookLM“ in der Doku
+  (docs/setup/google.md, Abschnitt „Falls die Automatik nicht geht“)."""
+
+
+def nlm_script_cmd(args):
+    """The login helper (NLM_LOGIN_SCRIPT) in the Python of notebooklm, as
+    the student, on the display of the container."""
+    env = [f"DISPLAY={NLM_DISPLAY}", "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright"]
+    if os.environ.get(NLM_TEST_ENV):
+        env.append(f"{NLM_TEST_ENV}={os.environ[NLM_TEST_ENV]}")
+    cmd = ["env"] + env + [NLM_PYTHON, "-I", "-c", NLM_LOGIN_SCRIPT] + args
+    return as_user_env(cmd) if os.geteuid() == 0 else cmd
+
+
+def nlm_display_ok():
+    """True when the X server of the container (XWayland in weston) answers,
+    on its abstract socket (as X clients try first) or its socket file."""
+    path = "/tmp/.X11-unix/X" + NLM_DISPLAY.lstrip(":")
+    for address in ("\0" + path, path):
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(3)
+        try:
+            s.connect(address)
+            return True
+        except OSError:
+            pass
+        finally:
+            s.close()
+    return False
+
+
+def nlm_profile_lock(profile):
+    """None when the Chromium profile is free, else {"pid": int|None,
+    "laeuft": bool}. Chromium marks a profile in use with the symlink
+    SingletonLock -> "<host>-<pid>"."""
+    lock = os.path.join(profile, "SingletonLock")
+    if not os.path.lexists(lock):
+        return None
+    try:
+        target = os.readlink(lock)
+    except OSError:
+        target = ""
+    host, _, pid = target.rpartition("-")
+    running = False
+    if host == socket.gethostname() and pid.isdigit():
+        try:
+            with open(f"/proc/{pid}/comm", encoding="utf-8") as f:
+                running = "chrom" in f.read()
+        except OSError:
+            running = False
+    return {"pid": int(pid) if pid.isdigit() else None, "laeuft": running}
+
+
+def nlm_remove_lock(profile):
+    for name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        try:
+            os.unlink(os.path.join(profile, name))
+        except FileNotFoundError:
+            pass
+
+
+def nlm_unlock(profile, opts):
+    """Frees a locked browser profile after asking. Returns True when the
+    profile can be used."""
+    lock = nlm_profile_lock(profile)
+    if not lock:
+        return True
+    if lock["laeuft"]:
+        print(f"Das Browserprofil von NotebookLM ist belegt: Ein Chromium-Fenster "
+              f"(Prozess {lock['pid']}) läuft noch, vermutlich von einer früheren Anmeldung.")
+        question = "Dieses Chromium-Fenster jetzt schließen?"
+    else:
+        print("Das Browserprofil von NotebookLM ist gesperrt, aber kein Chromium benutzt es "
+              "(veraltete Sperre, z. B. nach einem Neustart des Containers).")
+        question = "Veraltete Sperre entfernen?"
+    if not opts["yes"] and not is_terminal():
+        print("Ohne Terminal erledigt clawbook das nur mit --yes.")
+        return False
+    if not (opts["yes"] or ask_yes_default(question)):
+        print("Abgebrochen. Schließen Sie das Chromium-Fenster auf dem Remotedesktop und "
+              "rufen Sie danach erneut auf: clawbook notebooklm anmelden")
+        return False
+    if lock["laeuft"]:
+        for sig, wait in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
+            try:
+                os.kill(lock["pid"], sig)
+            except ProcessLookupError:
+                break
+            for _ in range(wait * 10):
+                if not os.path.exists(f"/proc/{lock['pid']}"):
+                    break
+                time.sleep(0.1)
+            if not os.path.exists(f"/proc/{lock['pid']}"):
+                break
+        if os.path.exists(f"/proc/{lock['pid']}"):
+            print(f"Chromium (Prozess {lock['pid']}) ließ sich nicht beenden.")
+            return False
+        print("Das Chromium-Fenster ist geschlossen.")
+    nlm_remove_lock(profile)
+    if not lock["laeuft"]:
+        print("Die veraltete Sperre ist entfernt.")
+    return True
+
+
+def nlm_duration(seconds):
+    if seconds % 60 == 0:
+        minutes = seconds // 60
+        return "1 Minute" if minutes == 1 else f"{minutes} Minuten"
+    return f"{seconds} Sekunden"
+
+
+def notebooklm_login(opts):
+    """clawbook notebooklm anmelden: Chromium with the browser profile of
+    notebooklm on the Google sign-in (remote desktop), waits until the
+    session cookies are there, saves them as storage_state.json, runs
+    notebooklm-fix-cookies and checks the login online."""
+    if opts["json"]:
+        raise CliError("„clawbook notebooklm anmelden“ gibt es nicht mit --json "
+                       "(die Anmeldung braucht Sie am Bildschirm).", code=2)
+    test = os.environ.get(NLM_TEST_ENV, "")
+    limit = opts.get("zeitgrenze") or NLM_LOGIN_TIMEOUT
+    if not os.path.isfile(NLM_PYTHON):
+        print("NotebookLM: notebooklm ist in diesem Image nicht installiert.")
+        return 1
+    if not nlm_display_ok():
+        print("NotebookLM: Kein Bildschirm erreichbar. Der Bildschirm des Containers "
+              f"(Weston/XWayland, DISPLAY={NLM_DISPLAY}) antwortet nicht, deshalb kann "
+              "clawbook kein Chromium-Fenster öffnen. Prüfen Sie mit „clawbook status“, "
+              "ob weston läuft; sonst starten Sie den Container neu.")
+        return 1
+    rc, out = run_stdout(nlm_script_cmd(["--pfade"]), timeout=60)
+    try:
+        found = json.loads(out.strip().splitlines()[-1])
+        profile = found["profil"]
+    except (ValueError, IndexError, KeyError, TypeError):
+        print(f"NotebookLM: Die Ablage von notebooklm ließ sich nicht ermitteln "
+              f"(Exit-Code {rc}).")
+        return 1
+    if not nlm_unlock(profile, opts):
+        return 1
+    if opts["neu"] and os.path.isdir(profile):
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        os.rename(profile, f"{profile}.alt-{stamp}")
+        print(f"Das Browserprofil ist zurückgesetzt (das alte liegt in {profile}.alt-{stamp}).")
+    print(f"""NotebookLM-Anmeldung
+  Das erledigt clawbook: Es öffnet auf dem Bildschirm des Containers ein
+  Chromium-Fenster mit der Google-Anmeldung, erkennt die Anmeldung selbst
+  und speichert sie für notebooklm.
+  Das tun Sie selbst:
+    1. Öffnen Sie unter Windows den Remotedesktop des Containers,
+       zum Beispiel in PowerShell: mstsc /v:localhost:3390
+    2. Melden Sie sich im Chromium-Fenster bei Google an (E-Mail, Passwort,
+       Bestätigung), bis NotebookLM erscheint.
+Ich warte, bis die Anmeldung erkannt ist (höchstens {nlm_duration(limit)}; Abbrechen mit Strg+C).""",
+          flush=True)
+    proc = subprocess.Popen(nlm_script_cmd([str(limit)]), stdin=subprocess.DEVNULL)
+    try:
+        rc = proc.wait(timeout=limit + 180)
+    except KeyboardInterrupt:
+        try:
+            # Strg+C reaches the whole terminal group; send it anyway, in case
+            # only clawbook was interrupted.
+            proc.send_signal(signal.SIGINT)
+            proc.wait(timeout=20)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            proc.kill()
+            proc.wait()
+        rc = 130
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        rc = 124
+    lock = nlm_profile_lock(profile)
+    if lock and not lock["laeuft"]:
+        # Chromium ended without cleaning up (Strg+C): no stale lock left behind.
+        nlm_remove_lock(profile)
+    if rc != 0:
+        if rc == 3:
+            print(f"NotebookLM: Innerhalb von {nlm_duration(limit)} wurde keine Anmeldung "
+                  "erkannt. Nichts wurde gespeichert; die bisherige Anmeldung bleibt, wie sie "
+                  "war. Noch einmal: clawbook notebooklm anmelden")
+        elif rc == 4:
+            print("NotebookLM: Chromium ließ sich auf dem Bildschirm des Containers nicht "
+                  "starten. Nichts wurde gespeichert.")
+            print(NLM_FALLBACK)
+        elif rc == 5:
+            print("NotebookLM: Nichts wurde gespeichert. Noch einmal: clawbook notebooklm "
+                  "anmelden")
+        elif rc == 130:
+            print("\nNotebookLM: Abgebrochen. Nichts wurde gespeichert.")
+        else:
+            print(f"NotebookLM: Die Anmeldung ist fehlgeschlagen (Exit-Code {rc}).")
+            print(NLM_FALLBACK)
+        return 1
+    print("Übertrage die Anmeldung auf die alte NotebookLM-Adresse "
+          "(notebooklm-fix-cookies) ...", flush=True)
+    ok, out = notebooklm_fix()
+    print(f"notebooklm-fix-cookies: {out or ('fertig' if ok else 'fehlgeschlagen')}")
+    if test:
+        print("Prüfe die NotebookLM-Anmeldung (Testmodus: nur lokal) ...", flush=True)
+        state = notebooklm_state(test=False)
+    else:
+        print("Prüfe die NotebookLM-Anmeldung (mit Anfrage an NotebookLM) ...", flush=True)
+        state = notebooklm_state(test=True)
+    if state["zustand"] == "angemeldet":
+        who = f" als {state['konto']}" if state["konto"] else ""
+        if state["online_geprueft"]:
+            print(f"NotebookLM: angemeldet{who}; die Verbindung zu NotebookLM klappt.")
+        else:
+            print(f"NotebookLM: angemeldet{who}. {state['meldung'] or ''}".rstrip())
+        return 0
+    print("NotebookLM: Die Sitzung ist gespeichert, aber die Prüfung meldet: "
+          f"{state['meldung'] or NLM_TEXT[state['zustand']]}.")
+    print("Melden Sie sich noch einmal an, mit zurückgesetztem Browserprofil: "
+          "clawbook notebooklm anmelden --neu")
+    print(NLM_FALLBACK)
     return 1
 
 
@@ -4091,7 +4471,7 @@ clawbook - Menü
   6  Pakete und Kurse
   7  {github_item}
   8  {login_item}
-  9  NotebookLM-Anmeldung prüfen
+  9  NotebookLM-Anmeldung prüfen und anmelden
  10  Agenten-Ausstattung (MCP-Server, Skills, Schlüssel)
   0  Beenden"""
 
@@ -4099,7 +4479,7 @@ clawbook - Menü
 def plain(**kw):
     opts = {"json": False, "quiet": False, "private": False, "yes": False, "write": False,
             "vor_wsm": False, "vorladen": False, "pruefen": False, "dienst": False,
-            "entfernen": False}
+            "entfernen": False, "neu": False, "zeitgrenze": None}
     opts.update(kw)
     return opts
 
@@ -4296,7 +4676,7 @@ def interactive():
 FLAGS = {"--json": "json", "--quiet": "quiet", "-q": "quiet", "--private": "private",
          "--yes": "yes", "-y": "yes", "--write": "write", "--vor-wsm": "vor_wsm",
          "--vorladen": "vorladen", "--pruefen": "pruefen", "--dienst": "dienst",
-         "--entfernen": "entfernen"}
+         "--entfernen": "entfernen", "--neu": "neu"}
 
 
 def version_text():
@@ -4329,8 +4709,12 @@ def dispatch(words, opts):
         return cmd_wiederherstellen(opts)
     if cmd == "github":
         return cmd_github(opts, args)
-    if cmd == "notebooklm" and not args:
-        return cmd_notebooklm(opts)
+    if cmd == "notebooklm":
+        if not args:
+            return cmd_notebooklm(opts)
+        if args == ["anmelden"]:
+            return notebooklm_login(opts)
+        raise CliError("Aufruf: clawbook notebooklm [anmelden]", code=2)
     if cmd == "wsm":
         return cmd_wsm(opts, args)
     if cmd == "agenten":
@@ -4364,6 +4748,9 @@ def main(argv):
             return 0
         if a in FLAGS:
             opts[FLAGS[a]] = True
+        elif a.startswith("--zeitgrenze=") and a.split("=", 1)[1].isdigit() \
+                and int(a.split("=", 1)[1]) > 0:
+            opts["zeitgrenze"] = int(a.split("=", 1)[1])
         elif a.startswith("-"):
             words = None
             bad = a

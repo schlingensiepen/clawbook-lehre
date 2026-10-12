@@ -16,8 +16,8 @@ sofern nicht anders gewünscht.
   bietet dasselbe als Werkzeuge an. Chromium liegt im Image, ein Fenster
   gibt es nur auf dem Remotedesktop.
 - NotebookLM: `notebooklm` (Skill `notebooklm`). Anmeldung macht die
-  Nutzerin oder der Nutzer selbst (`notebooklm login`, prüfen mit
-  `clawbook notebooklm`).
+  Nutzerin oder der Nutzer selbst mit `clawbook notebooklm` (Chromium auf
+  dem Remotedesktop; nicht `notebooklm login`).
 - graphify: Wissensgraph aus Code und Dokumenten (Skill `graphify`,
   Ausgabe in `graphify-out/`).
 - `uv` für Python-Projekte (`uv add`, `uv run`) und Python-Werkzeuge

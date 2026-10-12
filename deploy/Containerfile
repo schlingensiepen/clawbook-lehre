@@ -142,8 +142,8 @@ RUN test -n "${PLAYWRIGHT_VERSION}" -a -n "${PLAYWRIGHT_CLI_VERSION}" \
  && chmod -R a+rX /opt/ms-playwright \
  && rm -rf /var/lib/apt/lists/*
 
-# notebooklm-py with its browser extra: "notebooklm login" opens Chromium
-# through the Python Playwright, pinned to a release whose Chromium is
+# notebooklm-py with its browser extra: "clawbook notebooklm anmelden" (and
+# "notebooklm login") open Chromium through the Python Playwright, pinned to a release whose Chromium is
 # already in /opt/ms-playwright.
 ARG GRAPHIFY_VERSION
 ARG NOTEBOOKLM_VERSION
