@@ -8,8 +8,17 @@
 # to cancel). Without a terminal nothing is asked; the arguments always go
 # to the real wsm unchanged.
 #
+# An existing configuration of wsm 1.0 (a single location ~/source) is
+# never replaced by wsm itself; clawbook offers once to renew it ("clawbook
+# wsm erneuern --vor-wsm", asks only with a terminal and a GitHub login,
+# never stops wsm). Saying no leaves the marker below in ~/.clawbook. The
+# grep is only a cheap pre-filter (a "path: ~/source" line); clawbook
+# decides.
+#
 # The real wsm lives in /opt/clawbook/tool-bin (see deploy/Containerfile).
 REAL=/opt/clawbook/tool-bin/wsm
+# A line "path: ~/source" (also /home/<user>/source, $HOME/source, quoted).
+OLD_CONFIG_RE="^[[:space:]]*(-[[:space:]]+)?path:[[:space:]]*[\"']?(~|/home/[^/]+|[\$]HOME|[\$][{]HOME[}])/source/?[\"']?[[:space:]]*\$"
 
 check=1
 for arg in "$@"; do
@@ -22,6 +31,13 @@ if [ "${check}" = 1 ] && [ -t 0 ] && [ -t 1 ] && [ "$(id -u)" != 0 ] \
    && [ ! -e "${HOME}/.workspacemanager.yml" ] \
    && ! gh auth status --hostname github.com >/dev/null 2>&1; then
   /usr/local/bin/clawbook github login --vor-wsm || exit 1
+fi
+
+if [ "${check}" = 1 ] && [ -t 0 ] && [ -t 1 ] && [ "$(id -u)" != 0 ] \
+   && [ -e "${HOME}/.workspacemanager.yml" ] \
+   && [ ! -e "${HOME}/.clawbook/wsm-konfiguration-behalten" ] \
+   && grep -Eq "${OLD_CONFIG_RE}" "${HOME}/.workspacemanager.yml"; then
+  /usr/local/bin/clawbook wsm erneuern --vor-wsm || true
 fi
 
 exec "${REAL}" "$@"

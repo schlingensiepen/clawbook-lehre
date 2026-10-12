@@ -11,8 +11,10 @@ Diese Werkzeuge brauchen keinen Zugang bei einem
 Anbieter. Sie sind im Image installiert und
 funktionieren sofort. Zwei davon — Playwright und
 Graphify — melden Sie einmal bei Claude Code an,
-damit der Agent sie benutzen kann; das dauert eine
-Minute und steht hier Schritt für Schritt.
+damit der Agent sie benutzen kann (den Skill für
+`playwright-cli` richtet der Container schon selbst
+ein); das dauert eine Minute und steht hier Schritt
+für Schritt.
 
 **Kosten:** keine. (Graphify nutzt für Dokumente das
 Modell Ihres Agenten, also dessen Kontingent.)
@@ -37,19 +39,21 @@ belastet den Kontext des Agenten (seinen
 „Arbeitsspeicher" an Text) deutlich weniger als der
 MCP-Server, weil keine großen Werkzeugbeschreibungen
 geladen werden. Claude Code erfährt davon über einen
-**Skill** — eine kurze Anleitung, die Sie einmal
-installieren:
+**Skill** — eine kurze Anleitung. Den richtet der
+Container beim ersten Start einmal in Ihrem
+Home-Verzeichnis ein (`~/.claude/skills/playwright-cli`,
+dazu `~/.playwright/cli.config.json` mit Chromium als
+Browser); Claude Code findet ihn damit in jedem
+Projekt. Sie müssen nichts tun.
+
+Von Hand brauchen Sie den Befehl nur, wenn Sie den
+Skill gelöscht haben (im Home) oder ihn in einem
+einzelnen Projekt haben wollen (im Projektordner):
 
 ```bash
+cd ~                       # oder: cd ~/source/<Bereich>/<Projekt>
 playwright-cli install --skills
 ```
-
-Der Befehl legt den Skill im aktuellen Projektordner
-an (unter `.claude/skills/`) und dazu eine kleine
-Einstellungsdatei `.playwright/cli.config.json`, die
-Chromium als Browser einträgt. Führen Sie ihn also in
-dem Projekt aus, in dem der Agent den Browser nutzen
-soll.
 
 Danach reicht es, den Agenten zu bitten: „Öffne mit
 playwright-cli die Seite … und sag mir, was dort
@@ -200,7 +204,27 @@ wsm --help     # alle Befehle
 ```
 
 Die Einstellungen liegen in `~/.workspacemanager.yml`;
-der Speicherort `~/source` ist voreingestellt. Eine
+voreingestellt sind Bereiche unter `~/source`, etwa
+`~/source/github` für eigene Projekte, `~/source/samples`
+und `~/source/sandbox`.
+
+**Ältere Konfiguration:** Hat eine frühere Version von
+`wsm` die Datei angelegt, kennt sie nur den einen Ordner
+`~/source`. Das erkennt der Container und fragt einmal —
+im `clawbook`-Menü nach der GitHub-Prüfung oder beim
+nächsten Start von `wsm`: „Ihre
+WorkspaceManager-Konfiguration (~/.workspacemanager.yml)
+ist veraltet … Konfiguration jetzt erneuern? [J/n]".
+Mit Enter wird die alte Datei als
+`~/.workspacemanager.yml.alt-<Datum>` gesichert, und
+`wsm` schreibt seine neue Standard-Konfiguration mit
+Ihrem GitHub-Namen. Ihre Projekte unter `~/source`
+bleiben, wo sie sind; eigene Änderungen aus der alten
+Datei (etwa eine Docling-Adresse) übertragen Sie von
+Hand. Mit `n` bleibt alles, wie es ist, und die Frage
+kommt nicht wieder; später erneuern Sie mit
+`clawbook wsm erneuern`. Die Erneuerung braucht die
+GitHub-Anmeldung. Eine
 tmux-Sitzung, die `wsm` gestartet hat, verlassen Sie mit
 `Strg+B`, dann `D` — sie läuft weiter (siehe
 [Übersicht](README.md), „Wie Sie ein Programm wieder

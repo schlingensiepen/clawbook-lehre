@@ -16,6 +16,12 @@ the exit code tells success (0) or failure (non-zero).
     clawbook kurs vscode <id>       merged course description for VS Code
     clawbook github status [--json] is gh logged in to GitHub? (never prompts)
     clawbook github login           GitHub login with gh (needs a terminal)
+    clawbook github identitaet      git user.name/user.email from the GitHub
+                                    account (asks; --json only reports)
+    clawbook notebooklm [--yes]     NotebookLM login state; offers the cookie
+                                    fix when the login is incomplete
+    clawbook wsm status|erneuern    detect an outdated wsm configuration
+                                    (single location ~/source) and renew it
     clawbook pakete katalog         technology and course packages (clawbook-apt)
     clawbook pakete add|remove <name...> [--yes] [--vorladen]
     clawbook pakete vorladen        PlatformIO platform for ESP32 (pioarduino)
@@ -24,6 +30,9 @@ the exit code tells success (0) or failure (non-zero).
 
 Interactive start: when gh is not logged in, the menu begins with the
 GitHub login (the student may cancel; then she is asked again next time).
+After a GitHub login clawbook offers to take name and noreply address of
+the GitHub account as git identity, and it offers once to renew an outdated
+wsm configuration (the wsm wrapper does the same before wsm starts).
 /etc/profile.d/zz-clawbook-menu.sh opens the menu on interactive SSH
 logins; /usr/local/bin/wsm asks for the GitHub login before the first run
 of the WorkspaceManager ("clawbook github login --vor-wsm").
@@ -79,6 +88,18 @@ GH_HOST = "github.com"
 # Marker in ~/.clawbook: do not open the menu on SSH login. Same name in
 # /etc/profile.d/zz-clawbook-menu.sh.
 MENU_OFF_FILE = "menue-beim-login-aus"
+# WorkspaceManager: its configuration in the home, the Python of its uv tool
+# environment (to create the default configuration without changing wsm)
+# and the marker "keep the old configuration, do not ask again" in
+# ~/.clawbook (same name in /usr/local/bin/wsm).
+WSM_CONFIG = ".workspacemanager.yml"
+WSM_PYTHON = "/opt/uv-tools/wsm/bin/python"
+WSM_KEEP_FILE = "wsm-konfiguration-behalten"
+WSM_CREATE = ("from wsm.config import default_config_path, ensure_default_config; "
+              "ensure_default_config(default_config_path())")
+# NotebookLM: login data of notebooklm-py (same paths as notebooklm-fix-cookies).
+NOTEBOOKLM_STORAGE = (".notebooklm/profiles/default/storage_state.json",
+                      ".notebooklm/storage_state.json")
 
 # Tools checked by "clawbook check": (name, command). Same checks and order
 # as the former shell script clawbook-check.
@@ -135,6 +156,16 @@ Aufruf:
                                    Kennung clawbook = ohne Kurs)
   clawbook github status [--json]  bist du bei GitHub angemeldet?
   clawbook github login            bei GitHub anmelden (Browser, Gerätecode)
+  clawbook github identitaet [--yes] [--json]
+                                   Name und E-Mail für Git aus dem GitHub-Konto
+                                   übernehmen (--json zeigt nur den Vorschlag)
+  clawbook notebooklm [--yes] [--json]
+                                   NotebookLM-Anmeldung prüfen, unvollständige
+                                   Anmeldung reparieren (notebooklm-fix-cookies)
+  clawbook wsm status [--json]     ist die wsm-Konfiguration veraltet?
+  clawbook wsm erneuern [--yes] [--json]
+                                   neue Standard-Konfiguration für wsm
+                                   (die alte Datei wird gesichert)
   clawbook pakete                  Menü „Pakete und Kurse“ (interaktiv)
   clawbook pakete katalog [--json] Kurse und Technikpakete der Paketquelle
   clawbook pakete add <name...> [--yes] [--vorladen] [--json]
@@ -190,6 +221,17 @@ def run(cmd, timeout=60, stdin=subprocess.DEVNULL, env=None):
     try:
         p = subprocess.run(cmd, stdin=stdin, stdout=subprocess.PIPE,
                            stderr=subprocess.STDOUT, timeout=timeout, env=full_env)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 127, str(e)
+    return p.returncode, p.stdout.decode("utf-8", "replace")
+
+
+def run_stdout(cmd, timeout=60):
+    """Like run(), but returns only stdout (stderr is dropped) - for
+    commands whose stdout is parsed as JSON."""
+    try:
+        p = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
         return 127, str(e)
     return p.returncode, p.stdout.decode("utf-8", "replace")
@@ -273,6 +315,15 @@ def ask_yes(question):
     except EOFError:
         return False
     return answer in ("j", "ja", "y", "yes")
+
+
+def ask_yes_default(question):
+    """Like ask_yes, but Enter means yes."""
+    try:
+        answer = input(f"{question} [J/n] ").strip().lower()
+    except EOFError:
+        return False
+    return answer in ("", "j", "ja", "y", "yes")
 
 
 def human_bytes(n):
@@ -393,19 +444,29 @@ def check_tool(cmd):
 
 
 def collect_checks():
+    """Tool checks plus the NotebookLM login (local check only, no network).
+    The login line is information, never a failure: "ok" stays True."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        nlm = pool.submit(notebooklm_state)
         results = list(pool.map(lambda t: check_tool(t[1]), TOOLS))
-    return [{"name": name, "version": first if ok else None, "ok": ok,
-             "befehl": " ".join(cmd)}
-            for (name, cmd), (ok, first) in zip(TOOLS, results)]
+        nlm = nlm.result()
+    checks = [{"name": name, "version": first if ok else None, "ok": ok,
+               "befehl": " ".join(cmd)}
+              for (name, cmd), (ok, first) in zip(TOOLS, results)]
+    checks.append({"name": "notebooklm-anmeldung", "version": NLM_TEXT[nlm["zustand"]],
+                   "ok": True, "zustand": nlm["zustand"], "befehl": "clawbook notebooklm",
+                   "anzeige": "NotebookLM", "hinweis": NLM_CHECK_HINT.get(nlm["zustand"], "")})
+    return checks
 
 
 def cmd_check(opts):
     checks = collect_checks()
     failed = any(not c["ok"] for c in checks)
     if opts["json"]:
-        sys.stdout.write(dump_json([{"name": c["name"], "version": c["version"],
-                                     "ok": c["ok"]} for c in checks]))
+        sys.stdout.write(dump_json([dict({"name": c["name"], "version": c["version"],
+                                          "ok": c["ok"]},
+                                         **({"zustand": c["zustand"]} if "zustand" in c else {}))
+                                    for c in checks]))
         return 1 if failed else 0
     if not opts["quiet"]:
         print("clawbook-lehre - Werkzeuge")
@@ -418,7 +479,7 @@ def cmd_check(opts):
     for c in checks:
         if c["ok"]:
             if not opts["quiet"]:
-                print(f"  {c['name']:<16} {c['version']}")
+                print(f"  {c.get('anzeige', c['name']):<16} {c['version']}{c.get('hinweis', '')}")
         else:
             print(f"  {c['name']:<16} FEHLT ({c['befehl']})")
     return 1 if failed else 0
@@ -1578,6 +1639,7 @@ def github_login():
     print(f"Bei GitHub angemeldet als {state['benutzer'] or 'unbekannt'}.")
     if not github_ssh_ok():
         print(GITHUB_SSH_HINT)
+    git_identity_offer()
     return True
 
 
@@ -1611,6 +1673,8 @@ def cmd_github(opts, args):
             return 0 if state["angemeldet"] else 1
         github_show(state)
         return 0 if state["angemeldet"] else 1
+    if args == ["identitaet"]:
+        return cmd_github_identity(opts)
     if args == ["login"]:
         if opts["json"] or not is_terminal():
             raise CliError("Die GitHub-Anmeldung braucht ein Terminal: clawbook github login",
@@ -1622,7 +1686,8 @@ def cmd_github(opts, args):
             github_show(state)
             return 0
         return 0 if github_offer() else 1
-    raise CliError("Aufruf: clawbook github status [--json] | clawbook github login", code=2)
+    raise CliError("Aufruf: clawbook github status [--json] | clawbook github login | "
+                   "clawbook github identitaet [--yes] [--json]", code=2)
 
 
 def github_show(state=None):
@@ -1662,6 +1727,428 @@ def github_before_wsm():
     if ask_yes("Trotzdem mit wsm fortfahren?"):
         return 0
     print("wsm nicht gestartet. Anmelden mit: clawbook github login")
+    return 1
+
+
+# --- git identity ----------------------------------------------------------
+# After the GitHub login: user.name from the GitHub account (its login when
+# no name is set) and the noreply address <id>+<login>@users.noreply.github.com,
+# so a real e-mail address never ends up in public commits.
+
+NOREPLY_DOMAIN = "users.noreply.github.com"
+
+
+def github_user():
+    """{"login", "id", "name"} of the logged-in GitHub account, or None."""
+    if not shutil.which("gh"):
+        return None
+    rc, out = run_stdout(as_user(["gh", "api", "user"]), timeout=30)
+    if rc != 0:
+        return None
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return None
+    if (not isinstance(data, dict) or not isinstance(data.get("login"), str)
+            or not data["login"] or not isinstance(data.get("id"), int)):
+        return None
+    return {"login": data["login"], "id": data["id"],
+            "name": data["name"] if isinstance(data.get("name"), str) else ""}
+
+
+def git_global(key):
+    rc, out = run_stdout(as_user(["git", "config", "--global", "--get", key]), timeout=10)
+    value = out.strip()
+    return value if rc == 0 and value else None
+
+
+def git_identity_plan(user, current_name, current_email):
+    """What to do with the git identity. "aktion": "gleich" (already set
+    like this), "setzen" (nothing set, or only matching parts) or
+    "abweichend" (other values set; overwrite only on request)."""
+    name = user["name"].strip() or user["login"]
+    email = f"{user['id']}+{user['login']}@{NOREPLY_DOMAIN}"
+    if current_name == name and current_email == email:
+        aktion = "gleich"
+    elif current_name not in (None, name) or current_email not in (None, email):
+        aktion = "abweichend"
+    else:
+        aktion = "setzen"
+    return {"name": name, "email": email, "github": user["login"],
+            "bisher": {"name": current_name, "email": current_email}, "aktion": aktion}
+
+
+def git_identity_collect():
+    user = github_user()
+    if user is None:
+        raise CliError("GitHub kennt Ihr Konto gerade nicht: nicht angemeldet oder GitHub "
+                       "nicht erreichbar (clawbook github status).")
+    return git_identity_plan(user, git_global("user.name"), git_global("user.email"))
+
+
+def git_identity_set(plan):
+    for key, value in (("user.name", plan["name"]), ("user.email", plan["email"])):
+        rc, out = run(as_user(["git", "config", "--global", key, value]), timeout=10)
+        if rc != 0:
+            raise CliError(f"git config --global {key} ist fehlgeschlagen: {out.strip()}")
+
+
+def git_identity_offer(only_if_unset=False):
+    """Interactive: shows the identity from GitHub and sets it after asking.
+    only_if_unset: ask only when user.name or user.email is missing (menu
+    check). Returns True when the identity was set."""
+    try:
+        plan = git_identity_collect()
+    except CliError as e:
+        print(f"Git-Identität: {e}")
+        return False
+    old = plan["bisher"]
+    if plan["aktion"] == "gleich" or (only_if_unset and old["name"] and old["email"]):
+        return False
+    print()
+    if plan["aktion"] == "setzen":
+        print("Git trägt in jeden Commit einen Namen und eine E-Mail-Adresse ein.")
+        print("Aus Ihrem GitHub-Konto:")
+        print(f"  Name:   {plan['name']}")
+        print(f"  E-Mail: {plan['email']}")
+        print("  (die Noreply-Adresse von GitHub; Ihre echte E-Mail-Adresse bleibt privat)")
+        agreed = ask_yes_default("Diese Angaben für Git übernehmen?")
+    else:
+        print("Git ist schon mit anderen Angaben eingerichtet:")
+        print(f"  bisher:      {old['name'] or '(kein Name)'} <{old['email'] or 'keine E-Mail'}>")
+        print(f"  aus GitHub:  {plan['name']} <{plan['email']}>")
+        agreed = ask_yes("Die Angaben aus GitHub übernehmen?")
+    if not agreed:
+        print("Git-Identität unverändert. Von Hand ändern mit:")
+        print('  git config --global user.name "Vorname Nachname"')
+        print(f'  git config --global user.email "{plan["email"]}"')
+        return False
+    git_identity_set(plan)
+    print(f"Git-Identität gesetzt: {plan['name']} <{plan['email']}>")
+    return True
+
+
+def cmd_github_identity(opts):
+    """clawbook github identitaet: --json reports the plan (and never asks);
+    --yes sets it without asking."""
+    plan = git_identity_collect()
+    if opts["yes"] and plan["aktion"] != "gleich":
+        git_identity_set(plan)
+        plan["gesetzt"] = True
+        if not opts["json"]:
+            print(f"Git-Identität gesetzt: {plan['name']} <{plan['email']}>")
+    if opts["json"]:
+        plan.setdefault("gesetzt", False)
+        sys.stdout.write(dump_json(plan))
+        return 0
+    if opts["yes"]:
+        return 0
+    if plan["aktion"] == "gleich":
+        print(f"Git-Identität passt schon: {plan['name']} <{plan['email']}>")
+        return 0
+    if not is_terminal():
+        raise CliError("Die Rückfrage braucht ein Terminal: clawbook github identitaet "
+                       "(oder --yes)", code=2)
+    git_identity_offer()
+    return 0
+
+
+# --- wsm configuration -----------------------------------------------------
+# wsm 1.0 wrote a configuration with a single location ~/source. wsm 1.1
+# creates one with several locations below ~/source (github, samples,
+# sandbox, ...), but only when the file is missing. clawbook renews an old
+# one on request: the old file is kept as ~/.workspacemanager.yml.alt-<date>,
+# then wsm's own function writes the default configuration (with stdin
+# closed; the GitHub name comes from gh, name and e-mail from git config).
+# Projects below ~/source are never touched.
+
+def wsm_config_path():
+    return os.path.join(user_home(), WSM_CONFIG)
+
+
+def wsm_keep_path():
+    return os.path.join(state_dir(), WSM_KEEP_FILE)
+
+
+def wsm_config_outdated(path):
+    """True for the configuration of wsm 1.0: exactly one "path:" entry,
+    and it is ~/source. Line based (the image has no YAML module here)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError):
+        return False
+    paths = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        m = re.match(r"^\s*(?:-\s+)?path:\s*(.*?)\s*$", line)
+        if m:
+            value = m.group(1).split(" #", 1)[0].strip().strip("'\"").rstrip("/")
+            paths.append(value)
+    home = user_home()
+    old = ("~/source", f"{home}/source", "$HOME/source", "${HOME}/source")
+    return len(paths) == 1 and paths[0] in old
+
+
+def wsm_state():
+    path = wsm_config_path()
+    return {"datei": path, "vorhanden": os.path.isfile(path),
+            "veraltet": wsm_config_outdated(path),
+            "nicht_mehr_fragen": os.path.exists(wsm_keep_path())}
+
+
+def wsm_renew():
+    """Backs up the old configuration and lets wsm write its default one.
+    Returns the path of the backup."""
+    gh = github_state()
+    if not (gh["angemeldet"] and gh["geprueft"]):
+        raise CliError("Für die neue wsm-Konfiguration braucht clawbook Ihre GitHub-Anmeldung "
+                       "(wsm übernimmt Ihren GitHub-Namen). Erst anmelden: "
+                       "clawbook github login")
+    path = wsm_config_path()
+    backup = f"{path}.alt-{datetime.date.today().isoformat()}"
+    n = 2
+    while os.path.exists(backup):
+        backup = f"{path}.alt-{datetime.date.today().isoformat()}-{n}"
+        n += 1
+    os.rename(path, backup)
+    rc, out = run(as_user([WSM_PYTHON, "-I", "-c", WSM_CREATE]), timeout=60)
+    if rc != 0 or not os.path.isfile(path):
+        if not os.path.exists(path):
+            os.rename(backup, path)
+        detail = out.strip().splitlines()[-1] if out.strip() else f"Exit-Code {rc}"
+        raise CliError(f"wsm hat keine neue Konfiguration geschrieben ({detail}); "
+                       "die alte Datei ist wieder an ihrem Platz.")
+    return backup
+
+
+WSM_OUTDATED = """
+WorkspaceManager-Konfiguration
+------------------------------
+Ihre WorkspaceManager-Konfiguration (~/.workspacemanager.yml) ist veraltet:
+Sie kennt nur den Ordner ~/source. Die neue Standard-Konfiguration teilt ihn in
+Bereiche wie ~/source/github (eigene Projekte), ~/source/samples und
+~/source/sandbox. Die alte Datei wird gesichert; Ihre Projekte unter ~/source
+bleiben, wie sie sind."""
+
+
+def wsm_offer(ask_again=False):
+    """Interactive: offers to renew an outdated configuration. Without
+    ask_again it stays quiet when the student said no before, when the
+    configuration is fine and when GitHub is not available. Returns True
+    when renewed."""
+    st = wsm_state()
+    if not st["veraltet"] or (st["nicht_mehr_fragen"] and not ask_again):
+        return False
+    gh = github_state()
+    if not (gh["angemeldet"] and gh["geprueft"]) and not ask_again:
+        return False
+    print(WSM_OUTDATED)
+    if not ask_yes_default("Konfiguration jetzt erneuern?"):
+        write_user_file(wsm_keep_path(), "Alte wsm-Konfiguration behalten "
+                                         "(erneuern: clawbook wsm erneuern).\n")
+        print("Die alte Konfiguration bleibt; clawbook fragt nicht wieder.")
+        print("Später erneuern mit: clawbook wsm erneuern")
+        return False
+    backup = wsm_renew()
+    print("Neue Konfiguration angelegt: ~/.workspacemanager.yml")
+    print(f"Die alte Datei liegt in {backup}.")
+    return True
+
+
+def cmd_wsm(opts, args):
+    usage = "Aufruf: clawbook wsm status [--json] | clawbook wsm erneuern [--yes] [--json]"
+    if args == ["status"]:
+        st = wsm_state()
+        if opts["json"]:
+            sys.stdout.write(dump_json(st))
+        elif not st["vorhanden"]:
+            print("wsm hat noch keine Konfiguration; sie entsteht beim ersten Start von wsm.")
+        elif st["veraltet"]:
+            print("Die wsm-Konfiguration ist veraltet (nur ~/source). "
+                  "Erneuern mit: clawbook wsm erneuern")
+        else:
+            print(f"Die wsm-Konfiguration ist aktuell ({st['datei']}).")
+        return 0
+    if args != ["erneuern"]:
+        raise CliError(usage, code=2)
+    if opts["vor_wsm"]:
+        # From the wsm wrapper: ask at most once, never stop wsm.
+        if is_terminal() and not opts["json"]:
+            try:
+                wsm_offer()
+            except CliError as e:
+                print(f"Hinweis: {e}")
+        return 0
+    st = wsm_state()
+    if opts["yes"]:
+        backup = wsm_renew() if st["veraltet"] else None
+        if opts["json"]:
+            sys.stdout.write(dump_json(dict(wsm_state(), erneuert=backup is not None,
+                                            sicherung=backup)))
+        elif backup:
+            print(f"Neue Konfiguration angelegt; die alte Datei liegt in {backup}.")
+        else:
+            print("Nichts zu erneuern: Die wsm-Konfiguration fehlt oder ist aktuell.")
+        return 0
+    if opts["json"] or not is_terminal():
+        raise CliError("Ohne Terminal braucht „clawbook wsm erneuern“ die Bestätigung --yes.",
+                       code=2)
+    if not st["veraltet"]:
+        print("Nichts zu erneuern: Die wsm-Konfiguration fehlt oder ist aktuell.")
+        return 0
+    return 0 if wsm_offer(ask_again=True) else 1
+
+
+# --- notebooklm ------------------------------------------------------------
+# notebooklm-py keeps its Google login in ~/.notebooklm. "notebooklm auth
+# check --json" checks it locally (file, cookies); with --test it also asks
+# NotebookLM (network). Google moved NotebookLM to notebook.google.com, the
+# CLI still reads the cookies of notebooklm.google.com: notebooklm-fix-cookies
+# copies them over. clawbook knows three states: angemeldet, unvollstaendig
+# (login present but not usable as it is) and nicht_angemeldet; "unbekannt"
+# when notebooklm itself does not answer.
+
+NLM_TEXT = {"angemeldet": "angemeldet", "unvollstaendig": "unvollständig",
+            "nicht_angemeldet": "nicht angemeldet", "unbekannt": "unbekannt"}
+NLM_CHECK_HINT = {"unvollstaendig": " (reparieren: clawbook notebooklm)",
+                  "nicht_angemeldet": " (Anmeldung: clawbook notebooklm)",
+                  "unbekannt": " (prüfen: clawbook notebooklm)"}
+NLM_NETWORK_RE = re.compile(r"resolv|connect|network|timed? ?out|unreachable|name or service",
+                            re.IGNORECASE)
+
+NLM_LOGIN = """\
+So melden Sie sich an:
+  1. Unter Windows den Bildschirm des Containers öffnen (Remotedesktop),
+     zum Beispiel in PowerShell: mstsc /v:localhost:3390
+  2. Hier im Terminal eingeben: notebooklm login
+  3. Im Chromium-Fenster auf dem Remotedesktop bei Google anmelden, bis
+     NotebookLM geladen ist; dann den Hinweisen im Terminal folgen.
+  4. Danach prüfen (und wenn nötig reparieren): clawbook notebooklm"""
+
+
+def notebooklm_storage():
+    for rel in NOTEBOOKLM_STORAGE:
+        path = os.path.join(user_home(), rel)
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def notebooklm_repairable(path):
+    """True when cookies of notebook.google.com are missing or different
+    under notebooklm.google.com - exactly what notebooklm-fix-cookies fixes."""
+    if not path:
+        return False
+    try:
+        data = read_json(path)
+    except PermissionError:
+        rc, out = run_stdout(as_user(["cat", path]), timeout=10)
+        try:
+            data = json.loads(out) if rc == 0 else None
+        except ValueError:
+            data = None
+    except (OSError, ValueError):
+        data = None
+    cookies = data.get("cookies") if isinstance(data, dict) else None
+    if not isinstance(cookies, list):
+        return False
+    new = {c.get("name"): c.get("value") for c in cookies
+           if isinstance(c, dict) and c.get("domain") == "notebook.google.com"}
+    old = {c.get("name"): c.get("value") for c in cookies
+           if isinstance(c, dict) and c.get("domain") == "notebooklm.google.com"}
+    return any(old.get(name) != value for name, value in new.items())
+
+
+def notebooklm_state(test=False):
+    """Login state from "notebooklm auth check --json" (with --test also
+    online). Never prompts."""
+    state = {"zustand": "unbekannt", "konto": None, "reparierbar": False,
+             "online_geprueft": False, "meldung": None, "datei": None}
+    if not shutil.which("notebooklm"):
+        state["meldung"] = "notebooklm ist nicht installiert."
+        return state
+    cmd = ["notebooklm", "auth", "check", "--json"] + (["--test"] if test else [])
+    rc, out = run_stdout(as_user(cmd), timeout=90 if test else 30)
+    try:
+        data = json.loads(out)
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        state["meldung"] = f"notebooklm auth check antwortet nicht wie erwartet (Exit-Code {rc})."
+        return state
+    checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
+    details = data.get("details") if isinstance(data.get("details"), dict) else {}
+    account = data.get("account") or details.get("account")
+    if isinstance(account, dict):
+        account = account.get("email")
+    state.update(konto=account if isinstance(account, str) else None,
+                 meldung=details.get("error"),
+                 datei=data.get("storage_path") or details.get("storage_path"))
+    if not checks.get("storage_exists"):
+        state["zustand"] = "nicht_angemeldet"
+        return state
+    state["reparierbar"] = notebooklm_repairable(notebooklm_storage())
+    local_ok = bool(checks.get("json_valid") and checks.get("cookies_present")
+                    and checks.get("sid_cookie"))
+    fetched = checks.get("token_fetch")
+    state["online_geprueft"] = fetched is True
+    if rc == 0 and local_ok and (fetched is True or not state["reparierbar"]):
+        state["zustand"] = "angemeldet"
+    elif (local_ok and not state["reparierbar"] and fetched is False
+          and NLM_NETWORK_RE.search(str(state["meldung"] or ""))):
+        # Offline: the stored login looks fine, NotebookLM could not be asked.
+        state["zustand"] = "angemeldet"
+        state["meldung"] = "NotebookLM war nicht erreichbar (ohne Internet?): " + str(
+            state["meldung"])
+    else:
+        state["zustand"] = "unvollstaendig"
+    return state
+
+
+def notebooklm_fix():
+    """Runs notebooklm-fix-cookies as the student. Returns (ok, output)."""
+    rc, out = run(as_user(["/usr/local/bin/notebooklm-fix-cookies"]), timeout=60)
+    return rc == 0, out.strip()
+
+
+def cmd_notebooklm(opts):
+    state = notebooklm_state(test=True)
+    if state["zustand"] == "unvollstaendig" and state["reparierbar"]:
+        if not opts["json"]:
+            print("NotebookLM: Die Anmeldung ist unvollständig. Google hat NotebookLM auf die")
+            print("Adresse notebook.google.com umgezogen; das Werkzeug notebooklm sucht die")
+            print("Anmeldedaten noch unter der alten Adresse. notebooklm-fix-cookies kopiert")
+            print("sie um.")
+        repair = opts["yes"] or (not opts["json"] and is_terminal()
+                                 and ask_yes_default("Jetzt reparieren?"))
+        if repair:
+            ok, out = notebooklm_fix()
+            state = notebooklm_state(test=True)
+            state["repariert"] = ok
+            if not opts["json"]:
+                print(f"notebooklm-fix-cookies: {out or ('fertig' if ok else 'fehlgeschlagen')}")
+    if opts["json"]:
+        sys.stdout.write(dump_json(state))
+        return 0 if state["zustand"] == "angemeldet" else 1
+    z = state["zustand"]
+    if z == "angemeldet":
+        who = f" als {state['konto']}" if state["konto"] else ""
+        if state["online_geprueft"]:
+            print(f"NotebookLM: angemeldet{who}; die Verbindung zu NotebookLM klappt.")
+        else:
+            print(f"NotebookLM: angemeldet{who}. {state['meldung'] or ''}".rstrip())
+        return 0
+    if z == "nicht_angemeldet":
+        print("NotebookLM: nicht angemeldet.")
+    elif z == "unvollstaendig":
+        print("NotebookLM: Die Anmeldung ist unvollständig oder abgelaufen"
+              + (f" ({state['meldung']})." if state["meldung"] else ".")
+              + " Melden Sie sich neu an.")
+    else:
+        print(f"NotebookLM: Zustand unbekannt ({state['meldung']}).")
+    print(NLM_LOGIN)
     return 1
 
 
@@ -1706,6 +2193,7 @@ clawbook - Menü
   6  Pakete und Kurse
   7  {github_item}
   8  {login_item}
+  9  NotebookLM-Anmeldung prüfen
   0  Beenden"""
 
 
@@ -1832,11 +2320,18 @@ def interactive():
     # GitHub first: without a login git and wsm do not work properly.
     if terminal and not github["angemeldet"] and github_offer():
         github = github_state()
+    # Then, once: an outdated wsm configuration (needs the GitHub name).
+    if terminal and github["angemeldet"]:
+        try:
+            wsm_offer()
+        except CliError as e:
+            print(f"Fehler: {e}")
 
     def menu_github():
         nonlocal github
         if github["angemeldet"]:
             github_show()
+            git_identity_offer(only_if_unset=True)
         else:
             github_login()
         github = github_state()
@@ -1850,6 +2345,7 @@ def interactive():
         "6": menu_pakete,
         "7": menu_github,
         "8": lambda: set_menu_on_login(not menu_on_login()),
+        "9": lambda: cmd_notebooklm(plain()),
     }
     while True:
         print(MENU.format(
@@ -1917,6 +2413,10 @@ def dispatch(words, opts):
         return cmd_wiederherstellen(opts)
     if cmd == "github":
         return cmd_github(opts, args)
+    if cmd == "notebooklm" and not args:
+        return cmd_notebooklm(opts)
+    if cmd == "wsm":
+        return cmd_wsm(opts, args)
     raise CliError(f"Unbekannter Befehl: {' '.join(words)} (Hilfe: clawbook --help)",
                    code=2)
 

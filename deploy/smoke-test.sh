@@ -205,10 +205,122 @@ fi
 ssh_run 'test ! -e ~/.workspacemanager.yml' || fail "a wsm configuration was created"
 echo "login ok"
 
+# After the GitHub login, with a stand-in for gh (logged in as octo-student,
+# id 4242, no name) and a separate global git config: git identity and the
+# renewal of an old wsm configuration (single location ~/source).
+# shellcheck disable=SC2016 # expands on the container side
+FAKE='PATH=/tmp/fake-gh:$PATH GIT_CONFIG_GLOBAL=/tmp/fake-gitconfig'
+ssh_run 'mkdir -p /tmp/fake-gh && cat > /tmp/fake-gh/gh && chmod +x /tmp/fake-gh/gh' <<'SH'
+#!/bin/sh
+case "$*" in
+  "auth status"*) echo "github.com"; echo "  Logged in to github.com account octo-student"; exit 0 ;;
+  "auth token"*) echo "gho_stand-in" ;;
+  "api user --jq .login") echo "octo-student" ;;
+  "api user") echo '{"login": "octo-student", "id": 4242, "name": ""}' ;;
+  *) exit 1 ;;
+esac
+SH
+out=$(ssh_run "${FAKE} clawbook github identitaet --json") || fail "clawbook github identitaet --json failed: ${out}"
+json_ok "${out}" 'd["name"] == "octo-student" and d["email"] == "4242+octo-student@users.noreply.github.com" and d["aktion"] == "setzen" and not d["gesetzt"]' \
+  || fail "git identity: unexpected proposal: ${out}"
+out=$(ssh_tty '\n' "${FAKE} clawbook github identitaet; git config --file /tmp/fake-gitconfig user.email")
+if ! has 'Diese Angaben für Git übernehmen\? \[J/n\]' || ! has '^4242\+octo-student@users\.noreply\.github\.com'; then
+  fail "git identity was not set after Enter: ${out}"
+fi
+ssh_run 'git config --file /tmp/fake-gitconfig user.name "Someone Else"'
+out=$(ssh_tty '\n' "${FAKE} clawbook github identitaet; git config --file /tmp/fake-gitconfig user.name")
+if ! has 'Die Angaben aus GitHub übernehmen\? \[j/N\]' || ! has '^Someone Else'; then
+  fail "git identity overwrote a different name without consent: ${out}"
+fi
+ssh_run '! git config --global user.name' >/dev/null || fail "git identity test touched ~/.gitconfig"
+ssh_run 'cat > ~/.workspacemanager.yml' <<'YML'
+locations:
+- path: ~/source
+  git:
+    url: ssh://git@github.com
+    user: student
+wsl:
+  distro: Ubuntu
+YML
+out=$(ssh_run 'clawbook wsm status --json') || fail "clawbook wsm status --json failed"
+json_ok "${out}" 'd["vorhanden"] and d["veraltet"] and not d["nicht_mehr_fragen"]' \
+  || fail "old wsm configuration not detected: ${out}"
+out=$(ssh_tty 'n\n' "${FAKE} clawbook wsm erneuern --vor-wsm; echo \"rc=\$?\"")
+if ! has 'WorkspaceManager-Konfiguration .* ist veraltet' || ! has 'fragt nicht wieder' || ! has 'rc=0'; then
+  fail "wsm renewal was not offered: ${out}"
+fi
+ssh_run 'test -e ~/.clawbook/wsm-konfiguration-behalten && grep -q "path: ~/source$" ~/.workspacemanager.yml' \
+  || fail "declining the wsm renewal left no marker or changed the configuration"
+out=$(ssh_tty '' "${FAKE} clawbook wsm erneuern --vor-wsm; echo \"rc=\$?\"")
+if has 'veraltet' || ! has 'rc=0'; then
+  fail "wsm renewal asked again after no: ${out}"
+fi
+out=$(ssh_run "${FAKE} clawbook wsm erneuern --yes --json") || fail "clawbook wsm erneuern --yes failed: ${out}"
+json_ok "${out}" 'd["erneuert"] and not d["veraltet"] and ".workspacemanager.yml.alt-" in d["sicherung"]' \
+  || fail "wsm renewal: unexpected result: ${out}"
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'set -e; f=~/.workspacemanager.yml
+  grep -q "path: ~/source/github" "$f"; grep -q "path: ~/source/sandbox" "$f"
+  grep -q "user: octo-student" "$f"; grep -q "email: 4242+octo-student@users.noreply.github.com" "$f"
+  grep -q "path: ~/source$" "$f".alt-*
+  test -f ~/source/samples/primer/README.md' \
+  || fail "new wsm configuration, backup or projects not as expected"
+ssh_run "${FAKE} /opt/clawbook/tool-bin/wsm config --validate" >/dev/null \
+  || fail "wsm does not accept the renewed configuration"
+ssh_run 'rm -rf /tmp/fake-gh /tmp/fake-gitconfig ~/.workspacemanager.yml ~/.workspacemanager.yml.alt-*'
+# (~/.clawbook belongs to root; clawbook writes its markers there via sudo)
+docker exec "${NAME}" rm -f /home/student/.clawbook/wsm-konfiguration-behalten
+echo "git identity and wsm renewal ok"
+
+# NotebookLM: without a login "nicht_angemeldet" (in check and as command,
+# also as root); stored cookies only for notebook.google.com count as
+# incomplete, and the repair copies them.
+out=$(ssh_run 'clawbook check --json') || fail "clawbook check --json failed"
+json_ok "${out}" '[t.get("zustand") for t in d if t["name"] == "notebooklm-anmeldung"] == ["nicht_angemeldet"]' \
+  || fail "clawbook check --json: NotebookLM entry missing: ${out}"
+rc=0; out=$(ssh_run 'clawbook notebooklm --json') || rc=$?
+if [ "${rc}" != 1 ] || ! json_ok "${out}" 'd["zustand"] == "nicht_angemeldet"'; then
+  fail "clawbook notebooklm --json: expected nicht_angemeldet: ${out}"
+fi
+rc=0; out=$(docker exec "${NAME}" clawbook notebooklm --json) || rc=$?
+if [ "${rc}" != 1 ] || ! json_ok "${out}" 'd["zustand"] == "nicht_angemeldet"'; then
+  fail "clawbook notebooklm --json as root: ${out}"
+fi
+out=$(ssh_tty '' 'clawbook notebooklm; echo "rc=$?"')
+if ! has 'notebooklm login' || ! has 'rc=1'; then
+  fail "clawbook notebooklm does not explain the login: ${out}"
+fi
+ssh_run 'mkdir -p ~/.notebooklm/profiles/default && cat > ~/.notebooklm/profiles/default/storage_state.json' <<'JSON'
+{"cookies": [
+ {"name": "SID", "value": "stand-in", "domain": ".google.com", "path": "/", "expires": -1, "httpOnly": false, "secure": true, "sameSite": "Lax"},
+ {"name": "__Secure-1PSIDTS", "value": "stand-in", "domain": ".google.com", "path": "/", "expires": -1, "httpOnly": true, "secure": true, "sameSite": "Lax"},
+ {"name": "OSID", "value": "new", "domain": "notebook.google.com", "path": "/", "expires": -1, "httpOnly": true, "secure": true, "sameSite": "Lax"}],
+ "origins": []}
+JSON
+out=$(ssh_run 'clawbook check --json') || fail "clawbook check --json failed"
+json_ok "${out}" '[t.get("zustand") for t in d if t["name"] == "notebooklm-anmeldung"] == ["unvollstaendig"]' \
+  || fail "clawbook check --json: incomplete NotebookLM login not detected: ${out}"
+rc=0; out=$(ssh_run 'clawbook notebooklm --json') || rc=$?
+json_ok "${out}" 'd["zustand"] == "unvollstaendig" and d["reparierbar"] and "repariert" not in d' \
+  || fail "clawbook notebooklm --json: expected unvollstaendig, repairable: ${out}"
+rc=0; out=$(ssh_run 'clawbook notebooklm --yes --json') || rc=$?
+json_ok "${out}" 'd["repariert"] and not d["reparierbar"]' \
+  || fail "clawbook notebooklm --yes did not repair the cookies: ${out}"
+ssh_run 'grep -q "notebooklm.google.com" ~/.notebooklm/profiles/default/storage_state.json && rm -rf ~/.notebooklm' \
+  || fail "notebooklm-fix-cookies did not copy the cookies"
+echo "notebooklm ok"
+
 # Sample project in the WorkspaceManager layout, a git repo owned by student.
 ssh_run 'git -C ~/source/samples/primer log --oneline -1 && test -f ~/source/samples/primer/README.md' \
   || fail "sample project ~/source/samples/primer missing"
 echo "sample ok"
+
+# First start: the playwright-cli skill for Claude Code in the home, once.
+ssh_run 'test -f ~/.claude/skills/playwright-cli/SKILL.md && test -s ~/.clawbook/playwright-skill-eingerichtet' \
+  || fail "playwright-cli skill not installed in the home on the first start"
+grep -q "Playwright-Skill für Claude Code eingerichtet" <<<"${logs}" \
+  || fail "start log does not mention the playwright-cli skill"
+echo "playwright skill ok"
 
 # RDP: Weston answers and XWayland provides display :0.
 timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/${RDP_PORT}" \

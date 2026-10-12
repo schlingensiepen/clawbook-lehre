@@ -142,9 +142,10 @@ Drücken Sie **Enter** (oder `1`). Die Anmeldung
    [Übersicht](README.md), „So klappt die Anmeldung im
    Browser".
 5. Zurück im Terminal meldet `clawbook`: „Bei GitHub
-   angemeldet als <Ihr-Name>." Danach erscheint das
-   clawbook-Menü; mit `0` kommen Sie in die normale
-   Eingabezeile.
+   angemeldet als <Ihr-Name>." Gleich danach schlägt
+   es Name und E-Mail-Adresse für `git` vor (nächster
+   Abschnitt). Danach erscheint das clawbook-Menü; mit
+   `0` kommen Sie in die normale Eingabezeile.
 
 **Noch kein GitHub-Konto?** Dann legen Sie es jetzt
 an, wie oben unter [Konto anlegen](#konto-anlegen)
@@ -166,17 +167,46 @@ clawbook github login
 Der Zugang liegt danach in `~/.config/gh/` — nicht
 weitergeben.
 
-**Und jetzt?** Nach der Anmeldung tragen Sie Ihren
-Namen für `git` ein (nächster Abschnitt). Danach können
-Sie den WorkspaceManager `wsm` zum ersten Mal starten
-(siehe [Installation](../installation.md), Abschnitt 8).
+**Und jetzt?** Bestätigen Sie die Angaben für `git`
+(nächster Abschnitt). Danach können Sie den
+WorkspaceManager `wsm` zum ersten Mal starten (siehe
+[Installation](../installation.md), Abschnitt 8).
 
-### git: Ihren Namen eintragen
+### git: Name und E-Mail-Adresse
 
-Jeder Commit trägt Name und E-Mail-Adresse. Tragen Sie
-beides einmal ein, am besten auch vor dem ersten
-`wsm`; die Werte landen in `~/.gitconfig` in Ihrem
-Home-Verzeichnis:
+Jeder Commit trägt einen Namen und eine
+E-Mail-Adresse. Das übernimmt die Anmeldung für Sie:
+Direkt nach „Bei GitHub angemeldet als …" zeigt
+`clawbook` die Angaben aus Ihrem GitHub-Konto — den
+Namen, den Sie dort eingetragen haben (ohne Namen Ihren
+GitHub-Benutzernamen), und eine Adresse der Form
+`<zahl>+<name>@users.noreply.github.com`:
+
+```text
+Git trägt in jeden Commit einen Namen und eine E-Mail-Adresse ein.
+Aus Ihrem GitHub-Konto:
+  Name:   Erika Beispiel
+  E-Mail: 12345678+erika-beispiel@users.noreply.github.com
+  (die Noreply-Adresse von GitHub; Ihre echte E-Mail-Adresse bleibt privat)
+Diese Angaben für Git übernehmen? [J/n]
+```
+
+Drücken Sie **Enter**; `clawbook` trägt beides mit
+`git config --global` in `~/.gitconfig` in Ihrem
+Home-Verzeichnis ein. Stehen dort schon andere Angaben,
+zeigt `clawbook` alte und neue nebeneinander und fragt
+„Die Angaben aus GitHub übernehmen? [j/N]" — hier heißt
+Enter nein, Ihre Angaben bleiben. Haben Sie die Frage
+verpasst, bietet Menüpunkt **7 „GitHub-Anmeldung
+prüfen"** sie erneut an, solange Name oder E-Mail
+fehlen; jederzeit geht es auch mit:
+
+```bash
+clawbook github identitaet
+```
+
+**Von Hand** (wenn Sie andere Angaben wollen oder
+etwas nicht klappt):
 
 ```bash
 git config --global user.name "Vorname Nachname"
@@ -185,12 +215,13 @@ git config --global user.email "name@example.org"
 
 **Achtung bei der E-Mail-Adresse:** Sie steht in
 jedem Commit, und in einem öffentlichen Repository
-kann sie jeder lesen — auch Jahre später. GitHub bietet
-Ihnen deshalb unter Settings → Emails eine Adresse der
-Form `<zahl>+<name>@users.noreply.github.com` an.
-Tragen Sie **diese** als `user.email` ein; GitHub
-ordnet Ihnen die Commits trotzdem zu. Setzen Sie dort
-auch den Haken „Keep my email addresses private".
+kann sie jeder lesen — auch Jahre später. Deshalb
+schlägt `clawbook` die Noreply-Adresse vor; GitHub
+zeigt sie Ihnen auch unter Settings → Emails. Tragen
+Sie von Hand ebenfalls **diese** als `user.email` ein;
+GitHub ordnet Ihnen die Commits trotzdem zu. Setzen
+Sie dort auch den Haken „Keep my email addresses
+private".
 
 ### Kürzer: von Hand mit gh
 
@@ -269,7 +300,8 @@ Im clawbook-Menü (`clawbook` eingeben) steht oben
 „GitHub-Anmeldung prüfen"** zeigt mehr: ob Ihr
 SSH-Schlüssel bei GitHub hinterlegt ist („SSH-Schlüssel
 bei GitHub: hinterlegt") und was `gh` über die
-Anmeldung sagt. Dasselbe ohne Menü:
+Anmeldung sagt; fehlen Name oder E-Mail für `git`,
+bietet er sie an. Dasselbe ohne Menü:
 
 ```bash
 clawbook github status
@@ -290,7 +322,8 @@ access" ist normal).
 git config --global --list
 ```
 
-zeigt `user.name` und `user.email`.
+zeigt `user.name` und `user.email` (nach der
+Anmeldung über `clawbook` die Angaben aus GitHub).
 
 Für Copilot: im Beispielprojekt `copilot` starten und
 eine kleine Aufgabe stellen, zum Beispiel „Lege eine

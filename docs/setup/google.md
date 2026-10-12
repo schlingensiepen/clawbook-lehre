@@ -140,22 +140,36 @@ Abschnitt 6). Du arbeitest mit zwei Fenstern:
 5. In **Fenster A, immer danach:**
 
    ```bash
-   notebooklm-fix-cookies
+   clawbook notebooklm
    ```
 
-   Warum: Google hat NotebookLM auf eine neue Adresse
-   umgezogen (`notebook.google.com`), das
-   Kommandozeilen-Werkzeug erwartet die Anmeldedaten
-   aber noch unter der alten. Das Skript kopiert sie
-   um. Ohne diesen Schritt meldet jeder Befehl
+   Der Befehl prüft die Anmeldung, auch mit einer
+   Anfrage an NotebookLM. Meldet er „Die Anmeldung ist
+   unvollständig", fragt er „Jetzt reparieren? [J/n]" —
+   drücken Sie Enter. Warum: Google hat NotebookLM auf
+   eine neue Adresse umgezogen (`notebook.google.com`),
+   das Kommandozeilen-Werkzeug erwartet die
+   Anmeldedaten aber noch unter der alten. Die
+   Reparatur ruft das Skript `notebooklm-fix-cookies`
+   auf, das sie umkopiert, und prüft danach erneut.
+   Ohne diesen Schritt meldet jeder Befehl
    „Authentication expired", obwohl die Anmeldung
-   geklappt hat.
+   geklappt hat. Am Ende steht „NotebookLM: angemeldet
+   …; die Verbindung zu NotebookLM klappt."
+   (`notebooklm-fix-cookies` können Sie auch selbst
+   aufrufen.)
 
 6. Fenster B kannst du schließen; das trennt nur die
    Anzeige.
 
 Die Anmeldung läuft nach einiger Zeit ab; dann die
-Schritte 1 bis 5 wiederholen. Die Daten liegen in
+Schritte 1 bis 5 wiederholen. Ob Sie angemeldet sind,
+zeigt jederzeit `clawbook notebooklm` (auch Menüpunkt
+**9** im clawbook-Menü); ohne Anmeldung erklärt der
+Befehl diese Schritte in Kurzform. Auch `clawbook
+check` hat eine Zeile „NotebookLM" (angemeldet,
+unvollständig oder nicht angemeldet) — dort ohne
+Anfrage an NotebookLM, also auch ohne Internet. Die Daten liegen in
 `~/.notebooklm/` — nicht weitergeben.
 
 ### Stitch als MCP-Server für Claude Code
@@ -193,11 +207,13 @@ ohne Anmeldeaufforderung, bist du angemeldet.
 NotebookLM:
 
 ```bash
+clawbook notebooklm
 notebooklm list
 ```
 
-zeigt deine Notizbücher (bei einem neuen Konto eine
-leere Liste, aber keinen Fehler).
+Der erste Befehl muss „NotebookLM: angemeldet" melden;
+der zweite zeigt Ihre Notizbücher (bei einem neuen
+Konto eine leere Liste, aber keinen Fehler).
 
 Stitch:
 
@@ -212,8 +228,11 @@ Servers.
 ## Typische Fehler
 
 - **`notebooklm list` meldet „Authentication expired",
-  obwohl du dich gerade angemeldet hast** →
-  `notebooklm-fix-cookies` vergessen. Nachholen.
+  obwohl Sie sich gerade angemeldet haben** →
+  Schritt 5 vergessen. `clawbook notebooklm` aufrufen
+  und die Reparatur bestätigen. Meldet der Befehl
+  danach weiter „unvollständig oder abgelaufen",
+  melden Sie sich neu an (Schritte 1 bis 5).
 - **`notebooklm login` öffnet kein Fenster in
   Fenster B** → Normalerweise weiß das Terminal über
   die Variable `DISPLAY=:0`, wo der Bildschirm ist.
@@ -262,8 +281,8 @@ Servers.
 
 Erst „Typische Fehler" oben. Bei NotebookLM in dieser
 Reihenfolge prüfen: Fenster B zeigt den Bildschirm?
-`echo $DISPLAY` gibt `:0`? `notebooklm-fix-cookies`
-gelaufen? Bei Stitch `claude mcp get stitch`. Im Kurs
+`echo $DISPLAY` gibt `:0`? Was meldet `clawbook
+notebooklm`? Bei Stitch `claude mcp get stitch`. Im Kurs
 melden mit Befehl und Meldung — ohne Schlüssel und
 ohne Dateien aus `~/.notebooklm/`. Probleme mit dem
 Google-Konto selbst (gesperrt, Zwei-Faktor verloren)

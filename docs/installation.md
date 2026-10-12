@@ -729,6 +729,10 @@ Zusatz öffnet er das Menü aus Abschnitt 4 (bei
   prüfen** — je nachdem, ob Sie schon angemeldet sind.
 - **8** — das Menü beim Anmelden per SSH ab- oder
   wieder einschalten.
+- **9 NotebookLM-Anmeldung prüfen** — ob Sie bei
+  NotebookLM angemeldet sind; repariert eine
+  unvollständige Anmeldung (siehe
+  [Setup: Google](setup/google.md)).
 
 Prüfen Sie zuerst, ob alle Werkzeuge da sind: Menüpunkt
 2 oder direkt
