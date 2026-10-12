@@ -451,9 +451,11 @@ nicht, sagt das Skript „Der Container läuft nicht – ich
 starte ihn zuerst." und startet ihn.
 
 **Protokolle:** Jeder Lauf des Skripts schreibt in
-`%LOCALAPPDATA%\clawbook\logs\clawbook-<datum>.log` (eine
-Datei pro Tag); den Pfad nennt es am Anfang und bei jedem
-Fehler. Ihren privaten Schlüssel schwärzt es darin. Sie
+`%LOCALAPPDATA%\clawbook\logs\clawbook-JJJJMMTT-HHMM.log`
+(eine Datei pro Lauf, die neuesten 30 bleiben); den Pfad
+nennt es am Anfang und bei jedem Fehler. Scheitert der
+Download des Images, steht die Meldung von `wslc` im
+Protokoll. Ihren privaten Schlüssel schwärzt es darin. Sie
 dürfen das Protokoll an die Betreuung schicken — werfen
 Sie vorher kurz einen Blick hinein.
 
