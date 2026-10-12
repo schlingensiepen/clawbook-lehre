@@ -133,8 +133,8 @@ ssh_run 'clawbook key show --json' >/dev/null || fail "clawbook key show --json 
 echo "cli ok"
 
 # Sample project in the WorkspaceManager layout, a git repo owned by student.
-ssh_run 'git -C ~/source/Sample/primer log --oneline -1 && test -f ~/source/Sample/primer/README.md' \
-  || fail "sample project ~/source/Sample/primer missing"
+ssh_run 'git -C ~/source/samples/primer log --oneline -1 && test -f ~/source/samples/primer/README.md' \
+  || fail "sample project ~/source/samples/primer missing"
 echo "sample ok"
 
 # RDP: Weston answers and XWayland provides display :0.
@@ -166,8 +166,8 @@ second=$(ssh-keygen -lf "${WORK}/key")
 [ "${first}" = "${second}" ] || fail "SSH key changed after recreating the container"
 ssh_run true || fail "SSH login failed after recreating the container"
 # A deleted sample must not come back.
-ssh_run 'rm -rf ~/source/Sample' && docker restart "${NAME}" >/dev/null && wait_healthy
-ssh_run 'test ! -e ~/source/Sample' || fail "sample project was recreated after deletion"
+ssh_run 'rm -rf ~/source/samples' && docker restart "${NAME}" >/dev/null && wait_healthy
+ssh_run 'test ! -e ~/source/samples' || fail "sample project was recreated after deletion"
 echo "recreate ok"
 
 # clawbook key new: new key pair, the new key logs in, the old one no longer.

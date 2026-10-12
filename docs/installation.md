@@ -429,7 +429,7 @@ PowerShell-Fenster so lange offen.
    — so steht es dann unten in der Leiste. Klicken Sie
    darauf und wählen Sie „Vertrauen (Trust)".
 6. Links im Explorer sehen Sie das Beispielprojekt
-   `Sample/primer` — hier entstehen Ihre Projekte, nach
+   `samples/primer` — hier entstehen Ihre Projekte, nach
    dem Schema `~/source/<Thema>/<Projekt>` (Abschnitt 8).
 7. Terminal im Container: Menü „Terminal → Neues Terminal
    (New Terminal)". Es läuft im Container als `student`,
@@ -501,7 +501,7 @@ Verwaltungs-Skript hat dafür alles vorbereitet: Der Host
    (File → Open Folder…)". Oben erscheint ein Eingabefeld
    mit einem Pfad; dort `/home/student/source` eintragen
    und mit „OK" bestätigen. Darin liegt anfangs nur das
-   Beispielprojekt `Sample/primer` — hier entstehen
+   Beispielprojekt `samples/primer` — hier entstehen
    Ihre Projekte.
 6. Die Frage **„Vertrauen Sie den Autoren der Dateien in
    diesem Ordner? (Do you trust the authors …?)"** mit
@@ -605,7 +605,7 @@ eine Abkürzung für `clawbook check`.
 Ihre Projekte liegen unter `~/source`, sortiert nach
 Thema: `~/source/<Thema>/<Projekt>`, jedes Projekt ein
 eigenes Git-Repository. Ein erstes Beispiel ist schon da:
-`~/source/Sample/primer` — dort können Sie gefahrlos
+`~/source/samples/primer` — dort können Sie gefahrlos
 ausprobieren. Neue Projekte legt der WorkspaceManager mit
 dem Befehl `wsm` in genau dieser Struktur an und startet
 Agenten darin; `wsm --help` zeigt seine Möglichkeiten.

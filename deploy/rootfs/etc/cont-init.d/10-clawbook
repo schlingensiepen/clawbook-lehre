@@ -4,7 +4,7 @@
 #
 # 1. Fills the home directory of "student" with the image defaults
 #    (only files that do not exist yet - nothing is overwritten) and, on
-#    the first start of a new home, the sample project ~/source/Sample/primer.
+#    the first start of a new home, the sample project ~/source/samples/primer.
 # 2. Creates the keys and the Samba password if they are missing. All of
 #    them live in the home directory, so they survive a new image as long
 #    as the home volume is kept.
@@ -31,7 +31,7 @@ runuser -u "${USER_NAME}" -- cp -an /opt/clawbook/home-defaults/. "${USER_HOME}/
 #     WorkspaceManager uses (~/source/<topic>/<project>, each a git repo).
 #     Only when ~/source does not exist yet, so a deleted sample stays gone.
 if [ ! -e "${USER_HOME}/source" ]; then
-  PRIMER=${USER_HOME}/source/Sample/primer
+  PRIMER=${USER_HOME}/source/samples/primer
   runuser -u "${USER_NAME}" -- mkdir -p "${PRIMER}"
   runuser -u "${USER_NAME}" -- cp -a /opt/clawbook/sample-primer/. "${PRIMER}/"
   runuser -u "${USER_NAME}" -- git -C "${PRIMER}" init -q -b main

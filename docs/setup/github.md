@@ -140,7 +140,7 @@ einem Projektordner — für den ersten Test im
 Beispielprojekt:
 
 ```bash
-cd ~/source/Sample/primer
+cd ~/source/samples/primer
 copilot
 ```
 

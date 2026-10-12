@@ -419,7 +419,7 @@ function Show-Connect {
   Say ' 2. VS Code: Befehl erneut ausführen, Menüpunkt [9] (richtet beim'
   Say '    ersten Mal ein eigenes VS Code ein), oder im eigenen VS Code:'
   Say '    Remote-SSH → clawbook → Ordner /home/student/source'
-  Say '    (dort liegt anfangs das Beispielprojekt Sample/primer)'
+  Say '    (dort liegt anfangs das Beispielprojekt samples/primer)'
   Say " 3. Remotedesktop: mstsc /v:localhost:$RdpPort"
   Say '    Ohne Passwort. Fragt Windows nach dem Zertifikat: „Ja“ wählen.'
   Say ''
