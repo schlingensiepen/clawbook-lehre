@@ -115,17 +115,14 @@ Abschnitt 6). Sie arbeiten mit zwei Fenstern:
 - **Fenster B** — die Remotedesktopverbindung, die
   den Bildschirm des Containers zeigt.
 
-**Das erledigt clawbook:** `clawbook notebooklm` (im
-clawbook-Menü Punkt **9**) prüft die Anmeldung. Fehlt
-sie, fragt es „Jetzt anmelden (Chromium-Fenster auf dem
-Remotedesktop)? [J/n]"; direkt geht es mit
-`clawbook notebooklm anmelden`. clawbook öffnet dann in
-Fenster B ein Chromium-Fenster mit der
-Google-Anmeldung, erkennt selbst, wann Sie angemeldet
-sind, speichert die Sitzung für das Werkzeug
-`notebooklm`, passt sie an die neue Adresse von
-NotebookLM an (Skript `notebooklm-fix-cookies`, siehe
-unten) und prüft sie mit einer Anfrage an NotebookLM.
+**Das erledigt clawbook:** `clawbook notebooklm
+anmelden` öffnet in Fenster B ein Chromium-Fenster mit
+der Google-Anmeldung, erkennt selbst, wann Sie
+angemeldet sind, wartet, bis NotebookLM erscheint,
+speichert die Sitzung für das Werkzeug `notebooklm`,
+passt sie an die neue Adresse von NotebookLM an (Skript
+`notebooklm-fix-cookies`, siehe unten) und prüft sie
+mit einer Anfrage an NotebookLM.
 
 **Das tun Sie selbst:**
 
@@ -145,21 +142,28 @@ unten) und prüft sie mit einer Anfrage an NotebookLM.
 2. In **Fenster A**:
 
    ```bash
-   clawbook notebooklm
+   clawbook notebooklm anmelden
    ```
 
-   und die Frage nach der Anmeldung mit Enter
-   bestätigen. clawbook sagt: „Ich warte, bis die
-   Anmeldung erkannt ist (höchstens 5 Minuten;
-   Abbrechen mit Strg+C)."
+   clawbook sagt: „Ich warte, bis die Anmeldung erkannt
+   ist (höchstens 5 Minuten; Abbrechen mit Strg+C)."
+   Etwa jede Minute erscheint „Warte noch auf die
+   Anmeldung ... 3:00 verbleibend".
+
+   Alternativ: im clawbook-Menü Punkt **9** oder
+   `clawbook notebooklm`. Das prüft zuerst die
+   Anmeldung; fehlt sie, fragt es „Jetzt anmelden
+   (Chromium-Fenster auf dem Remotedesktop)? [J/n]" —
+   Enter startet dieselbe Anmeldung.
 
 3. In **Fenster B** erscheint ein Chromium-Fenster
    mit der Google-Anmeldung. Dort anmelden (E-Mail,
-   Passwort, Zwei-Faktor-Code). Sie müssen nichts
-   weiter tun: Sobald Google die Anmeldung bestätigt,
-   meldet Fenster A „Anmeldung erkannt", lädt kurz
-   NotebookLM, speichert und schließt das
-   Chromium-Fenster.
+   Passwort, Zwei-Faktor-Code), bis NotebookLM
+   erscheint. Fragt Google noch nach einer Bestätigung
+   (etwa auf dem Handy), meldet Fenster A „NotebookLM
+   ist noch nicht offen" und wartet weiter. Sobald
+   NotebookLM geladen ist, speichert clawbook und
+   schließt das Chromium-Fenster.
 
 4. Am Ende steht in Fenster A „NotebookLM: angemeldet
    als …; die Verbindung zu NotebookLM klappt."
@@ -170,12 +174,21 @@ Gibt es nach 5 Minuten keine Anmeldung, bricht clawbook
 ab und ändert nichts; dasselbe nach Strg+C. Eine schon
 gespeicherte Anmeldung sichert clawbook vor dem
 Überschreiben (`storage_state.json.alt-<Zeit>` in
-`~/.notebooklm/profiles/default/`).
+`~/.notebooklm/profiles/default/`, die letzten zwei
+bleiben). Mehr Zeit gibt `--zeitgrenze=600` (in
+Sekunden).
+
+`clawbook notebooklm anmelden --neu` legt das
+Browserprofil von NotebookLM neu an — so, als hätte
+Chromium Sie noch nie gesehen. Das hilft, wenn eine
+alte, halbe Anmeldung im Weg steht. Das alte Profil
+löscht clawbook erst, wenn die neue Anmeldung geklappt
+hat; bei Abbruch kommt es zurück.
 
 Die Anmeldung läuft nach einiger Zeit ab; dann
-`clawbook notebooklm` wiederholen. Ob Sie angemeldet
-sind, zeigt jederzeit `clawbook notebooklm`. Auch
-`clawbook check` hat eine Zeile „NotebookLM"
+`clawbook notebooklm anmelden` wiederholen. Ob Sie
+angemeldet sind, zeigt jederzeit `clawbook notebooklm`.
+Auch `clawbook check` hat eine Zeile „NotebookLM"
 (angemeldet, unvollständig oder nicht angemeldet) —
 dort ohne Anfrage an NotebookLM, also auch ohne
 Internet. Die Daten liegen in `~/.notebooklm/` — nicht
@@ -190,11 +203,15 @@ Anmeldung geklappt hat. Meldet `clawbook notebooklm`
 „Die Anmeldung ist unvollständig" und fragt „Jetzt
 reparieren? [J/n]", drücken Sie Enter.
 
-**Falls die Automatik nicht geht:** von Hand mit dem
-Werkzeug selbst. Bekanntes Problem: `notebooklm login`
-hält die Startseite von `notebook.google.com` für
-„angemeldet", meldet „Already logged in" und speichert
-keine Google-Sitzung. So geht es trotzdem:
+Warum clawbook die Anmeldung selbst übernimmt: Das
+Werkzeug hat mit `notebooklm login` eine eigene
+Anmeldung. Die hält in der Version im Image schon die
+Startseite von `notebook.google.com` für „angemeldet",
+meldet „Already logged in" und speichert keine
+Google-Sitzung.
+
+**Falls die Automatik nicht geht** (für
+Fortgeschrittene): von Hand mit dem Werkzeug selbst.
 
 1. Fenster B öffnen (siehe oben).
 2. In Fenster A Chromium mit dem Browserprofil von
@@ -325,23 +342,25 @@ echter Entwurf zeigt es.
   „unvollständig oder abgelaufen", melden Sie sich neu
   an; hilft auch das nicht, mit zurückgesetztem
   Browserprofil: `clawbook notebooklm anmelden --neu`.
-- **`clawbook notebooklm anmelden` meldet „Kein
-  Bildschirm erreichbar"** → Der Bildschirm des
-  Containers läuft nicht. `clawbook status` zeigt, ob
-  `weston` läuft; sonst den Container neu starten
-  ([Pflege](../pflege.md)).
+- **`clawbook notebooklm anmelden` meldet „Der
+  Bildschirm des Containers … antwortet nicht"** → Den
+  Container neu starten ([Pflege](../pflege.md)) und
+  noch einmal versuchen.
 - **`clawbook notebooklm anmelden` meldet „Das
   Browserprofil von NotebookLM ist belegt"** → Ein
   Chromium-Fenster einer früheren Anmeldung ist noch
   offen. clawbook bietet an, es zu schließen (bzw. eine
   veraltete Sperre zu entfernen); mit Enter bestätigen.
 - **Kein Chromium-Fenster in Fenster B** → Fenster B
-  erst nach dem Start geöffnet? Das Fenster ist trotzdem
-  da; sonst Fenster B schließen und neu verbinden.
+  schließen und neu verbinden.
 - **`notebooklm login` sagt „Already logged in", aber
-  `clawbook notebooklm` meldet „unvollständig"** → Das
-  bekannte Problem von `notebooklm login`. Melden Sie
-  sich mit `clawbook notebooklm anmelden` an.
+  `clawbook notebooklm` meldet „unvollständig"** →
+  Melden Sie sich mit `clawbook notebooklm anmelden`
+  an (Grund siehe oben).
+- **„NotebookLM ist nicht erschienen"** → Google wollte
+  noch eine Bestätigung, die nicht rechtzeitig kam.
+  Noch einmal `clawbook notebooklm anmelden` und die
+  Bestätigung gleich erledigen.
 - **Remote-Desktop meldet „Verbindung fehlgeschlagen"**
   → Läuft der Container? Die Adresse ist
   `localhost:3390`, nicht `3389`. Siehe
@@ -388,8 +407,7 @@ echter Entwurf zeigt es.
 
 Erst „Typische Fehler" oben. Bei NotebookLM in dieser
 Reihenfolge prüfen: Fenster B zeigt den Bildschirm?
-`echo $DISPLAY` gibt `:0`? Was meldet `clawbook
-notebooklm`? Bei Stitch `clawbook agenten` und `claude
+Was meldet `clawbook notebooklm`? Bei Stitch `clawbook agenten` und `claude
 mcp get stitch`. Im Kurs melden mit Befehl und Meldung —
 ohne Schlüssel und ohne Dateien aus `~/.notebooklm/`,
 `~/.clawbook/secrets` oder

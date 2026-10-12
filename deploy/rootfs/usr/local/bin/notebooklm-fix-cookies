@@ -4,11 +4,16 @@
 Google moved NotebookLM from notebooklm.google.com to notebook.google.com.
 The CLI (notebooklm-py) still expects the old domain. Run this script
 after every `notebooklm login`; "clawbook notebooklm anmelden" runs it
-itself.
+itself and passes the path of the file.
+
+    notebooklm-fix-cookies [PATH]
+
+Without PATH the script looks in the default places of notebooklm. The
+file is replaced atomically (mode 0600); no backup copy is left behind.
 """
 
 import json
-import shutil
+import os
 import sys
 from pathlib import Path
 
@@ -17,16 +22,38 @@ STORAGE_PATHS = [
     Path.home() / ".notebooklm" / "storage_state.json",
 ]
 
+
 def find_storage():
     for p in STORAGE_PATHS:
         if p.exists():
             return p
     return None
 
-def fix_cookies(path):
-    shutil.copy2(path, str(path) + ".bak")
 
-    with open(path) as f:
+def write_atomic(path, data):
+    """Writes data next to path (0600, fsync) and moves it into place."""
+    tmp = path.with_name(path.name + ".neu")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd = None
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def fix_cookies(path):
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     cookies = data.get("cookies", [])
@@ -60,22 +87,26 @@ def fix_cookies(path):
             "localStorage": list(nb_origin.get("localStorage", []))
         })
 
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
+    write_atomic(Path(path), data)
 
     print(f"OK - copied {updated} cookies from notebook.google.com to notebooklm.google.com.")
     return True
 
+
 def main():
-    path = find_storage()
-    if not path:
-        print("storage_state.json not found.", file=sys.stderr)
+    if len(sys.argv) > 2 or sys.argv[1:2] in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        sys.exit(0 if len(sys.argv) == 2 else 2)
+    path = Path(sys.argv[1]) if len(sys.argv) == 2 else find_storage()
+    if not path or not path.exists():
+        print(f"storage_state.json not found{f': {path}' if path else '.'}", file=sys.stderr)
         sys.exit(1)
 
     if fix_cookies(path):
         sys.exit(0)
     else:
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

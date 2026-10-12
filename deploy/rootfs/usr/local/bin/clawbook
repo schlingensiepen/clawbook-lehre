@@ -191,7 +191,8 @@ Aufruf:
                                    bei NotebookLM anmelden: Chromium-Fenster auf
                                    dem Remotedesktop, clawbook erkennt die
                                    Anmeldung und speichert sie (--neu: Browser-
-                                   profil vorher zurücksetzen)
+                                   profil neu anlegen; das alte wird nach
+                                   erfolgreicher Anmeldung gelöscht)
   clawbook wsm status [--json]     ist die wsm-Konfiguration veraltet?
   clawbook wsm erneuern [--yes] [--json]
                                    neue Standard-Konfiguration für wsm
@@ -2173,16 +2174,28 @@ So melden Sie sich an: clawbook notebooklm anmelden
 # of notebook.google.com for "logged in" ("notebooklm login" then says
 # "Already logged in" and stores no Google session). clawbook therefore
 # opens Chromium itself, with the browser profile of notebooklm, on the
-# Google sign-in, waits for the session cookies and saves the session as
-# notebooklm's storage_state.json (Playwright format).
+# Google sign-in, waits for the session cookies and for NotebookLM, and
+# saves the session as notebooklm's storage_state.json (Playwright format).
 NLM_PYTHON = "/opt/uv-tools/notebooklm-py/bin/python"
 NLM_DISPLAY = ":0"
 NLM_LOGIN_TIMEOUT = 300
+# After the sign-in is detected, NotebookLM may still wait for a
+# confirmation (phone, passkey): at least this long for it to open.
+NLM_TARGET_GRACE = 180
+# Head room of the outer time limit beyond the time limit of the user: the
+# wait for NotebookLM, two page loads of up to 60 s, saving, closing Chromium.
+NLM_TIMEOUT_RESERVE = NLM_TARGET_GRACE + 300
+# Stored logins kept as storage_state.json.alt-<time>.
+NLM_KEEP_BACKUPS = 2
 # Test mode for the smoke test (never touches the network): "cookies" puts
-# stand-in session cookies into the browser, "leer" waits without any.
+# stand-in session cookies into the browser, "leer" waits without any,
+# "umweg" has NotebookLM send the browser back to the Google sign-in. It
+# only applies while the root-owned marker file exists, which only the
+# smoke test creates.
 NLM_TEST_ENV = "CLAWBOOK_NLM_TEST"
+NLM_TEST_MARKER = "/run/clawbook-nlm-test"
 NLM_LOGIN_SCRIPT = r'''
-import datetime, json, os, sys, time
+import datetime, json, os, re, shutil, signal, sys, time
 from pathlib import Path
 
 REQUIRED = ("SID", "__Secure-1PSIDTS")
@@ -2190,6 +2203,21 @@ START_URL = ("https://accounts.google.com/ServiceLogin?continue="
              "https%3A%2F%2Fnotebook.google.com%2F")
 TARGET_URL = "https://notebook.google.com/"
 TARGET_HOST = "notebook.google.com"
+TEST_MARKER = "/run/clawbook-nlm-test"
+GOOGLE_DOMAIN = re.compile(r"(?:[a-z0-9-]+\.)*google\.(?:com|[a-z]{2}|co\.[a-z]{2}|com\.[a-z]{2})")
+
+
+class SaveError(Exception):
+    pass
+
+
+def test_mode():
+    mode = os.environ.get("CLAWBOOK_NLM_TEST", "")
+    try:
+        marker = os.lstat(TEST_MARKER)
+    except OSError:
+        return ""
+    return mode if marker.st_uid == 0 else ""
 
 
 def paths():
@@ -2201,37 +2229,191 @@ def paths():
         return base / "storage_state.json", base / "browser_profile"
 
 
+def host(url):
+    try:
+        return url.split("/")[2].rpartition("@")[2].split(":")[0].lower()
+    except (AttributeError, IndexError):
+        return ""
+
+
 def session(cookies):
     """Values of the required cookies of .google.com (None when one is missing)."""
     found = {c.get("name"): c.get("value") for c in cookies
              if c.get("domain") in (".google.com", "google.com") and c.get("name") in REQUIRED}
-    return tuple(found.get(n) for n in REQUIRED) if all(found.get(n) for n in REQUIRED) else None
+    return found if all(found.get(n) for n in REQUIRED) else None
 
 
-def on_target(context):
+def target_pages(context):
+    pages = []
     for page in context.pages:
         try:
-            if page.url.split("/")[2:3] == [TARGET_HOST]:
-                return True
+            if host(page.url) == TARGET_HOST:
+                pages.append(page)
         except Exception:
             pass
-    return False
+    return pages
 
 
-def save(context, storage):
-    storage.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    backup = None
-    if storage.exists():
-        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        backup = storage.with_name(storage.name + ".alt-" + stamp)
-        os.replace(storage, backup)
-    state = context.storage_state()
-    tmp = storage.with_name(storage.name + ".neu")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-    os.replace(tmp, storage)
+def clock(seconds):
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def wait(check, deadline, what):
+    """Polls check() until it is true (True) or the deadline passed (False);
+    a line about every 60 s tells that clawbook is still waiting."""
+    note = time.monotonic() + 60
+    while not check():
+        now = time.monotonic()
+        if now >= deadline:
+            return False
+        if now >= note:
+            print(f"Warte noch auf {what} ... {clock(deadline - now)} verbleibend", flush=True)
+            note = now + 60
+        time.sleep(1 if os.environ.get("CLAWBOOK_NLM_TEST") else 2)
+    return True
+
+
+def keep_backups(storage, keep):
+    olds = sorted(storage.parent.glob(storage.name + ".alt-*"))
+    for old in olds[:-keep] if keep else olds:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    for old in olds[-keep:] if keep else []:
+        try:
+            os.chmod(old, 0o600)
+        except OSError:
+            pass
+
+
+def backup_old(storage):
+    """Keeps the stored login as storage_state.json.alt-<time> (hard link,
+    else copy); the file itself stays where it is."""
+    if not storage.exists():
+        return None
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = storage.with_name(f"{storage.name}.alt-{stamp}")
+    n = 1
+    while os.path.lexists(backup):
+        n += 1
+        backup = storage.with_name(f"{storage.name}.alt-{stamp}-{n}")
+    try:
+        os.link(storage, backup)
+    except OSError:
+        shutil.copy2(storage, backup)
+    os.chmod(backup, 0o600)
     return backup
+
+
+def write_new(path, data):
+    """Writes data to path.neu (0600, fsync); returns that path."""
+    tmp = path.with_name(path.name + ".neu")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd = None
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        raise
+    return tmp
+
+
+def sync_dir(path):
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def scrub_context(storage):
+    """Removes a stale account binding of notebooklm (context.json "account")."""
+    ctx = storage.with_name("context.json")
+    try:
+        data = json.loads(ctx.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict) or "account" not in data:
+        return
+    del data["account"]
+    if data:
+        os.replace(write_new(ctx, data), ctx)
+    else:
+        ctx.unlink()
+
+
+def persist(storage, state):
+    """Saves the session filtered to Google cookies, without origins. The
+    stored login stays unchanged when anything fails. Returns the backup."""
+    try:
+        from notebooklm._auth.cookie_filter import (
+            filter_storage_state_cookies_by_domain_policy as policy_filter)
+        from notebooklm._browser.browser_capture import replace_captured_profile
+    except Exception:
+        policy_filter = replace_captured_profile = None
+    storage.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if policy_filter and replace_captured_profile:
+        # The writer of notebooklm itself (as after "notebooklm login" in a
+        # browser): domain policy, empty origins, no stale account binding,
+        # atomic under the lock of notebooklm.
+        filtered = policy_filter(dict(state))
+        if not session(filtered.get("cookies", [])):
+            raise SaveError("die Google-Sitzung fehlt nach dem Filtern")
+        backup = backup_old(storage)
+        try:
+            outcome = replace_captured_profile(storage, filtered, carry_account=False,
+                                               include_domains=None)
+            if not outcome.ok:
+                raise SaveError("die Datei ist gerade von notebooklm gesperrt"
+                                if outcome.lock_unavailable else "notebooklm speichert nicht")
+            os.chmod(storage, 0o600)
+        except BaseException:
+            if backup:
+                backup.unlink()
+            raise
+        return backup
+    filtered = {"cookies": [c for c in state.get("cookies", [])
+                            if GOOGLE_DOMAIN.fullmatch(str(c.get("domain", "")).lstrip(".").lower())],
+                "origins": []}
+    if not session(filtered["cookies"]):
+        raise SaveError("die Google-Sitzung fehlt nach dem Filtern")
+    tmp = write_new(storage, filtered)
+    backup = None
+    try:
+        backup = backup_old(storage)
+        os.replace(tmp, storage)
+    except BaseException:
+        for leftover in (tmp, backup):
+            if leftover:
+                try:
+                    leftover.unlink()
+                except OSError:
+                    pass
+        raise
+    sync_dir(storage.parent)
+    try:
+        scrub_context(storage)
+    except OSError:
+        print("Hinweis: Die alte Konto-Zuordnung in context.json ließ sich nicht entfernen.")
+    return backup
+
+
+def on_term(signum, frame):
+    raise KeyboardInterrupt
 
 
 def main():
@@ -2240,8 +2422,9 @@ def main():
     if args[:1] == ["--pfade"]:
         print(json.dumps({"storage": str(storage), "profil": str(profile)}))
         return 0
-    limit = int(args[0]) if args else 300
-    test = os.environ.get("CLAWBOOK_NLM_TEST", "")
+    limit, grace, keep = (int(a) for a in args[:3])
+    test = test_mode()
+    signal.signal(signal.SIGTERM, on_term)
     from playwright.sync_api import Error as PlaywrightError, sync_playwright
     profile.mkdir(parents=True, exist_ok=True, mode=0o700)
     with sync_playwright() as p:
@@ -2256,15 +2439,35 @@ def main():
             return 4
         try:
             page = context.pages[0] if context.pages else context.new_page()
+            if test:
+                # No network: NotebookLM answers locally, everything else is blocked.
+                body = "<title>NotebookLM-Test</title>TESTMODUS"
+                if test == "umweg":
+                    body = ("<script>location.replace('https://accounts.google.com/"
+                            "signin/challenge')</script>")
+
+                def answer(route):
+                    where = host(route.request.url)
+                    if where == TARGET_HOST:
+                        route.fulfill(status=200, content_type="text/html", body=body)
+                    elif where == "accounts.google.com":
+                        route.fulfill(status=200, content_type="text/html",
+                                      body="<title>Bestätigung</title>TESTMODUS")
+                    else:
+                        route.abort()
+                context.route("**/*", answer)
             before = session(context.cookies())
-            if test == "cookies":
-                stand_in = {"value": "clawbook-test", "path": "/", "secure": True,
+            if test in ("cookies", "umweg"):
+                # A new value each time: a new sign-in (new SID) for signed_in().
+                stand_in = {"value": f"clawbook-test-{time.time_ns()}", "path": "/",
+                            "secure": True,
                             "httpOnly": True, "sameSite": "Lax", "expires": -1}
                 context.add_cookies([dict(stand_in, name=n, domain=".google.com")
                                      for n in REQUIRED]
-                                    + [dict(stand_in, name="OSID", domain=TARGET_HOST)])
+                                    + [dict(stand_in, name="OSID", domain=TARGET_HOST),
+                                       dict(stand_in, name="fremd", domain=".example.org")])
             if test:
-                page.goto("data:text/html,<title>clawbook-test</title>NotebookLM-Test")
+                page.goto("data:text/html,<title>clawbook-test</title>TESTMODUS")
             else:
                 try:
                     page.goto(START_URL, wait_until="commit", timeout=60000)
@@ -2274,33 +2477,63 @@ def main():
                     print("Die Google-Anmeldung ließ sich nicht laden (ohne Internet?): "
                           + str(e).strip().splitlines()[0], flush=True)
             deadline = time.monotonic() + limit
-            while True:
+
+            def signed_in():
                 now = session(context.cookies())
-                # A session that was already in the profile counts only when
-                # it changed or Google sent the browser on to NotebookLM.
-                if now and (before is None or now != before or on_target(context)):
-                    break
-                if time.monotonic() >= deadline:
-                    print("Keine Anmeldung erkannt (Zeitgrenze erreicht).")
-                    return 3
-                time.sleep(2)
-            print("Anmeldung erkannt. Ich öffne NotebookLM und speichere die Sitzung ...",
-                  flush=True)
-            if not test:
+                # A session already in the profile counts only with a new SID
+                # or NotebookLM open: Google renews __Secure-1PSIDTS by itself.
+                return bool(now) and (before is None or now["SID"] != before["SID"]
+                                      or bool(target_pages(context)))
+
+            if not wait(signed_in, deadline, "die Anmeldung"):
+                print("Keine Anmeldung erkannt (Zeitgrenze erreicht).")
+                return 3
+            print("Anmeldung erkannt. Ich öffne NotebookLM ...", flush=True)
+            deadline = max(deadline, time.monotonic() + grace)
+            if not target_pages(context):
                 try:
-                    page.goto(TARGET_URL, wait_until="commit", timeout=30000)
-                    page.wait_for_load_state("domcontentloaded", timeout=30000)
-                except PlaywrightError:
+                    page.goto(TARGET_URL, wait_until="commit", timeout=60000)
+                except PlaywrightError as e:
+                    if "closed" in str(e).lower():
+                        raise
+            told = False
+            while True:
+                if not target_pages(context) and not told:
+                    print("NotebookLM ist noch nicht offen. Schließen Sie die Anmeldung im "
+                          "Chromium-Fenster ab (zum Beispiel die Bestätigung auf dem Handy), "
+                          "bis NotebookLM erscheint. Ich warte so lange.", flush=True)
+                    told = True
+                if not wait(lambda: bool(target_pages(context)), deadline, "NotebookLM"):
+                    print("NotebookLM ist nicht erschienen (Zeitgrenze erreicht).")
+                    return 6
+                try:
+                    target_pages(context)[0].wait_for_load_state("domcontentloaded",
+                                                                 timeout=60000)
+                except (PlaywrightError, IndexError):
                     pass
-                time.sleep(3)
-            backup = save(context, storage)
+                time.sleep(1 if test else 3)
+                # Still on NotebookLM after loading (no detour to the sign-in)?
+                if target_pages(context):
+                    break
+            state = context.storage_state()
+            if not [c for c in state.get("cookies", [])
+                    if str(c.get("domain", "")).lstrip(".") == TARGET_HOST]:
+                print("NotebookLM ist offen, aber Google hat keine Anmeldedaten für NotebookLM "
+                      "geschickt.")
+                return 7
+            try:
+                backup = persist(storage, state)
+            except (SaveError, OSError, ValueError, TypeError) as e:
+                print(f"Speichern fehlgeschlagen ({e}).")
+                return 8
+            keep_backups(storage, keep)
             print("Gespeichert: " + str(storage))
             if backup:
                 print("Die alte Datei ist gesichert als " + str(backup))
             return 0
         except PlaywrightError as e:
             if "closed" in str(e).lower():
-                print("Das Chromium-Fenster wurde geschlossen, bevor die Anmeldung erkannt war.")
+                print("Das Chromium-Fenster wurde geschlossen, bevor die Anmeldung fertig war.")
                 return 5
             raise
         except KeyboardInterrupt:
@@ -2308,7 +2541,7 @@ def main():
         finally:
             try:
                 context.close()
-            except Exception:
+            except BaseException:
                 pass
 
 
@@ -2361,13 +2594,13 @@ def notebooklm_state(test=False):
         state["meldung"] = "notebooklm ist nicht installiert."
         return state
     cmd = ["notebooklm", "auth", "check", "--json"] + (["--test"] if test else [])
-    rc, out = run_stdout(as_user(cmd), timeout=90 if test else 30)
+    rc, out = run_stdout(nlm_as_user(cmd), timeout=90 if test else 30)
     try:
         data = json.loads(out)
     except ValueError:
         data = None
     if not isinstance(data, dict):
-        state["meldung"] = f"notebooklm auth check antwortet nicht wie erwartet (Exit-Code {rc})."
+        state["meldung"] = "notebooklm antwortet bei der Prüfung nicht wie erwartet."
         return state
     checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
     details = data.get("details") if isinstance(data.get("details"), dict) else {}
@@ -2398,9 +2631,11 @@ def notebooklm_state(test=False):
     return state
 
 
-def notebooklm_fix():
-    """Runs notebooklm-fix-cookies as the student. Returns (ok, output)."""
-    rc, out = run(as_user(["/usr/local/bin/notebooklm-fix-cookies"]), timeout=60)
+def notebooklm_fix(path=None):
+    """Runs notebooklm-fix-cookies as the student, on path when given (else
+    the script looks for the file itself). Returns (ok, output)."""
+    cmd = ["/usr/local/bin/notebooklm-fix-cookies"] + ([path] if path else [])
+    rc, out = run(nlm_as_user(cmd), timeout=60)
     return rc == 0, out.strip()
 
 
@@ -2416,7 +2651,7 @@ def cmd_notebooklm(opts):
         repair = opts["yes"] or (not opts["json"] and is_terminal()
                                  and ask_yes_default("Jetzt reparieren?"))
         if repair:
-            ok, out = notebooklm_fix()
+            ok, out = notebooklm_fix(notebooklm_storage())
             say(opts, "Prüfe die NotebookLM-Anmeldung erneut ...")
             state = notebooklm_state(test=True)
             state["repariert"] = ok
@@ -2452,14 +2687,37 @@ NLM_FALLBACK = """Falls die Automatik nicht geht: Anleitung „NotebookLM“ in 
   (docs/setup/google.md, Abschnitt „Falls die Automatik nicht geht“)."""
 
 
-def nlm_script_cmd(args):
+def nlm_test_mode():
+    """The test mode of the smoke test: only with the root-owned marker file."""
+    mode = os.environ.get(NLM_TEST_ENV, "")
+    if not mode:
+        return ""
+    try:
+        marker = os.lstat(NLM_TEST_MARKER)
+    except OSError:
+        return ""
+    return mode if marker.st_uid == 0 else ""
+
+
+def nlm_as_user(cmd, env=()):
+    """cmd as the student. From root the NOTEBOOKLM_* variables of root are
+    dropped (runuser keeps the environment); only env is set on purpose."""
+    env = list(env)
+    if os.geteuid() == 0:
+        drop = [x for k in sorted(os.environ) if k.startswith("NOTEBOOKLM_") for x in ("-u", k)]
+        return (["runuser", "-u", USER_NAME, "--", "env"] + drop
+                + [f"HOME={user_home()}", f"USER={USER_NAME}", f"LOGNAME={USER_NAME}"]
+                + env + cmd)
+    return ["env"] + env + cmd if env else cmd
+
+
+def nlm_script_cmd(args, test=""):
     """The login helper (NLM_LOGIN_SCRIPT) in the Python of notebooklm, as
     the student, on the display of the container."""
     env = [f"DISPLAY={NLM_DISPLAY}", "PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright"]
-    if os.environ.get(NLM_TEST_ENV):
-        env.append(f"{NLM_TEST_ENV}={os.environ[NLM_TEST_ENV]}")
-    cmd = ["env"] + env + [NLM_PYTHON, "-I", "-c", NLM_LOGIN_SCRIPT] + args
-    return as_user_env(cmd) if os.geteuid() == 0 else cmd
+    if test:
+        env.append(f"{NLM_TEST_ENV}={test}")
+    return nlm_as_user([NLM_PYTHON, "-I", "-c", NLM_LOGIN_SCRIPT] + args, env)
 
 
 def nlm_display_ok():
@@ -2479,10 +2737,65 @@ def nlm_display_ok():
     return False
 
 
+def nlm_proc(pid):
+    """(uid, state, args) of a process; None when it is gone."""
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8", errors="replace") as f:
+            state = f.read().rpartition(")")[2].split()[0]
+        uid = os.stat(f"/proc/{pid}").st_uid
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            args = [a.decode("utf-8", "replace") for a in f.read().split(b"\0") if a]
+    except (OSError, IndexError):
+        return None
+    return uid, state, args
+
+
+def nlm_alive(pid):
+    """True while the process runs (a zombie counts as ended)."""
+    info = nlm_proc(pid)
+    return info is not None and info[1] != "Z"
+
+
+def nlm_uses_profile(pid, profile):
+    """True when pid is a live Chromium of the student with exactly this
+    browser profile."""
+    info = nlm_proc(pid)
+    return (info is not None and info[1] != "Z" and info[0] == user_info().pw_uid
+            and f"--user-data-dir={profile}" in info[2])
+
+
+def nlm_profile_procs(profile):
+    """All live processes of the student started with this browser profile."""
+    found = []
+    for entry in os.listdir("/proc"):
+        if entry.isdigit() and int(entry) != os.getpid() and nlm_uses_profile(entry, profile):
+            found.append(int(entry))
+    return found
+
+
+def nlm_stop(pids):
+    """SIGTERM, up to 10 s, then SIGKILL, up to 5 s. Returns the survivors."""
+    for sig, wait in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
+        pids = [pid for pid in pids if nlm_alive(pid)]
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+        for _ in range(wait * 10):
+            if not any(nlm_alive(pid) for pid in pids):
+                return []
+            time.sleep(0.1)
+    return [pid for pid in pids if nlm_alive(pid)]
+
+
 def nlm_profile_lock(profile):
     """None when the Chromium profile is free, else {"pid": int|None,
     "laeuft": bool}. Chromium marks a profile in use with the symlink
-    SingletonLock -> "<host>-<pid>"."""
+    SingletonLock -> "<host>-<pid>". The lock counts as live only when that
+    process is a Chromium of the student with exactly this profile; any
+    other process (after a restart the number may belong to anything) makes
+    it a stale lock."""
     lock = os.path.join(profile, "SingletonLock")
     if not os.path.lexists(lock):
         return None
@@ -2491,13 +2804,8 @@ def nlm_profile_lock(profile):
     except OSError:
         target = ""
     host, _, pid = target.rpartition("-")
-    running = False
-    if host == socket.gethostname() and pid.isdigit():
-        try:
-            with open(f"/proc/{pid}/comm", encoding="utf-8") as f:
-                running = "chrom" in f.read()
-        except OSError:
-            running = False
+    running = (host == socket.gethostname() and pid.isdigit()
+               and nlm_uses_profile(pid, profile))
     return {"pid": int(pid) if pid.isdigit() else None, "laeuft": running}
 
 
@@ -2516,8 +2824,8 @@ def nlm_unlock(profile, opts):
     if not lock:
         return True
     if lock["laeuft"]:
-        print(f"Das Browserprofil von NotebookLM ist belegt: Ein Chromium-Fenster "
-              f"(Prozess {lock['pid']}) läuft noch, vermutlich von einer früheren Anmeldung.")
+        print("Das Browserprofil von NotebookLM ist belegt: Ein Chromium-Fenster läuft noch, "
+              f"vermutlich von einer früheren Anmeldung (Prozess {lock['pid']}).")
         question = "Dieses Chromium-Fenster jetzt schließen?"
     else:
         print("Das Browserprofil von NotebookLM ist gesperrt, aber kein Chromium benutzt es "
@@ -2531,19 +2839,12 @@ def nlm_unlock(profile, opts):
               "rufen Sie danach erneut auf: clawbook notebooklm anmelden")
         return False
     if lock["laeuft"]:
-        for sig, wait in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
-            try:
-                os.kill(lock["pid"], sig)
-            except ProcessLookupError:
-                break
-            for _ in range(wait * 10):
-                if not os.path.exists(f"/proc/{lock['pid']}"):
-                    break
-                time.sleep(0.1)
-            if not os.path.exists(f"/proc/{lock['pid']}"):
-                break
-        if os.path.exists(f"/proc/{lock['pid']}"):
-            print(f"Chromium (Prozess {lock['pid']}) ließ sich nicht beenden.")
+        # The window and any remains with this profile (pgrep -f by profile).
+        left = nlm_stop([lock["pid"]])
+        left += nlm_stop([pid for pid in nlm_profile_procs(profile) if pid not in left])
+        if left:
+            print("Das Chromium-Fenster ließ sich nicht schließen. Starten Sie den Container "
+                  "neu und versuchen Sie es dann noch einmal.")
             return False
         print("Das Chromium-Fenster ist geschlossen.")
     nlm_remove_lock(profile)
@@ -2559,39 +2860,86 @@ def nlm_duration(seconds):
     return f"{seconds} Sekunden"
 
 
+def nlm_end_group(proc, sig):
+    """Ends the login helper: one signal to its process group (Chromium gets
+    the chance to close cleanly), up to 20 s, then SIGKILL for whatever is
+    left of the group."""
+    try:
+        os.killpg(proc.pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=20)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+NLM_RESULT = {
+    3: "Innerhalb von {dauer} wurde keine Anmeldung erkannt. Nichts wurde gespeichert; die "
+       "bisherige Anmeldung bleibt, wie sie war. Noch einmal: clawbook notebooklm anmelden",
+    4: "Chromium ließ sich auf dem Bildschirm des Containers nicht starten. Nichts wurde "
+       "gespeichert.",
+    5: "Nichts wurde gespeichert. Noch einmal: clawbook notebooklm anmelden",
+    6: "Google hat die Anmeldung angenommen, aber NotebookLM ist nicht erschienen (zum "
+       "Beispiel, weil eine Bestätigung noch offen war). Nichts wurde gespeichert; die "
+       "bisherige Anmeldung bleibt, wie sie war. Noch einmal: clawbook notebooklm anmelden",
+    7: "NotebookLM ist geöffnet, aber ohne Anmeldedaten. Nichts wurde gespeichert. Noch "
+       "einmal mit neuem Browserprofil: clawbook notebooklm anmelden --neu",
+    8: "Die Anmeldung ließ sich nicht speichern; die bisherige Anmeldung bleibt, wie sie war.",
+    124: "Die Anmeldung hat zu lange gedauert; clawbook hat sie abgebrochen. Ob trotzdem "
+         "etwas gespeichert ist, zeigt: clawbook notebooklm",
+    130: "Abgebrochen. Nichts wurde gespeichert.",
+}
+
+
 def notebooklm_login(opts):
     """clawbook notebooklm anmelden: Chromium with the browser profile of
     notebooklm on the Google sign-in (remote desktop), waits until the
-    session cookies are there, saves them as storage_state.json, runs
-    notebooklm-fix-cookies and checks the login online."""
+    session cookies are there and NotebookLM is open, saves them as
+    storage_state.json, runs notebooklm-fix-cookies and checks the login
+    online."""
     if opts["json"]:
         raise CliError("„clawbook notebooklm anmelden“ gibt es nicht mit --json "
                        "(die Anmeldung braucht Sie am Bildschirm).", code=2)
-    test = os.environ.get(NLM_TEST_ENV, "")
+    test = nlm_test_mode()
+    if os.environ.get(NLM_TEST_ENV) and not test:
+        print(f"Hinweis: {NLM_TEST_ENV} gilt nur im Rauchtest; ich melde normal an.")
+    if test:
+        print(f"TESTMODUS ({test}): keine echte Google-Anmeldung, nur für den Rauchtest.")
     limit = opts.get("zeitgrenze") or NLM_LOGIN_TIMEOUT
     if not os.path.isfile(NLM_PYTHON):
         print("NotebookLM: notebooklm ist in diesem Image nicht installiert.")
         return 1
     if not nlm_display_ok():
-        print("NotebookLM: Kein Bildschirm erreichbar. Der Bildschirm des Containers "
-              f"(Weston/XWayland, DISPLAY={NLM_DISPLAY}) antwortet nicht, deshalb kann "
-              "clawbook kein Chromium-Fenster öffnen. Prüfen Sie mit „clawbook status“, "
-              "ob weston läuft; sonst starten Sie den Container neu.")
+        print("NotebookLM: Der Bildschirm des Containers (den der Remotedesktop zeigt) "
+              "antwortet nicht, deshalb kann clawbook kein Chromium-Fenster öffnen. Starten "
+              "Sie den Container neu und versuchen Sie es dann noch einmal.")
         return 1
     rc, out = run_stdout(nlm_script_cmd(["--pfade"]), timeout=60)
     try:
         found = json.loads(out.strip().splitlines()[-1])
-        profile = found["profil"]
+        profile, storage = found["profil"], found["storage"]
     except (ValueError, IndexError, KeyError, TypeError):
-        print(f"NotebookLM: Die Ablage von notebooklm ließ sich nicht ermitteln "
-              f"(Exit-Code {rc}).")
+        print("NotebookLM: clawbook findet die Ablage von notebooklm nicht.")
+        print(NLM_FALLBACK)
         return 1
     if not nlm_unlock(profile, opts):
         return 1
+    old_profile = None
     if opts["neu"] and os.path.isdir(profile):
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        os.rename(profile, f"{profile}.alt-{stamp}")
-        print(f"Das Browserprofil ist zurückgesetzt (das alte liegt in {profile}.alt-{stamp}).")
+        old_profile = f"{profile}.alt-{stamp}"
+        os.rename(profile, old_profile)
+        print("Das Browserprofil wird neu angelegt. Das alte lösche ich erst, wenn die "
+              "Anmeldung geklappt hat.")
     print(f"""NotebookLM-Anmeldung
   Das erledigt clawbook: Es öffnet auf dem Bildschirm des Containers ein
   Chromium-Fenster mit der Google-Anmeldung, erkennt die Anmeldung selbst
@@ -2603,49 +2951,45 @@ def notebooklm_login(opts):
        Bestätigung), bis NotebookLM erscheint.
 Ich warte, bis die Anmeldung erkannt ist (höchstens {nlm_duration(limit)}; Abbrechen mit Strg+C).""",
           flush=True)
-    proc = subprocess.Popen(nlm_script_cmd([str(limit)]), stdin=subprocess.DEVNULL)
+    grace = limit if test else NLM_TARGET_GRACE
+    # A session of its own: Strg+C reaches only clawbook, which then ends
+    # the helper in a controlled way (nlm_end_group).
+    proc = subprocess.Popen(nlm_script_cmd([str(limit), str(grace), str(NLM_KEEP_BACKUPS)],
+                                           test),
+                            stdin=subprocess.DEVNULL, start_new_session=True)
     try:
-        rc = proc.wait(timeout=limit + 180)
+        rc = proc.wait(timeout=limit + NLM_TIMEOUT_RESERVE)
     except KeyboardInterrupt:
-        try:
-            # Strg+C reaches the whole terminal group; send it anyway, in case
-            # only clawbook was interrupted.
-            proc.send_signal(signal.SIGINT)
-            proc.wait(timeout=20)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            proc.kill()
-            proc.wait()
+        print("\nBeende die Anmeldung ...", flush=True)
+        nlm_end_group(proc, signal.SIGINT)
         rc = 130
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        nlm_end_group(proc, signal.SIGTERM)
         rc = 124
+    # Remains of Chromium (e.g. after SIGKILL) and a stale lock go away.
+    nlm_stop(nlm_profile_procs(profile))
     lock = nlm_profile_lock(profile)
     if lock and not lock["laeuft"]:
-        # Chromium ended without cleaning up (Strg+C): no stale lock left behind.
         nlm_remove_lock(profile)
-    if rc != 0:
-        if rc == 3:
-            print(f"NotebookLM: Innerhalb von {nlm_duration(limit)} wurde keine Anmeldung "
-                  "erkannt. Nichts wurde gespeichert; die bisherige Anmeldung bleibt, wie sie "
-                  "war. Noch einmal: clawbook notebooklm anmelden")
-        elif rc == 4:
-            print("NotebookLM: Chromium ließ sich auf dem Bildschirm des Containers nicht "
-                  "starten. Nichts wurde gespeichert.")
-            print(NLM_FALLBACK)
-        elif rc == 5:
-            print("NotebookLM: Nichts wurde gespeichert. Noch einmal: clawbook notebooklm "
-                  "anmelden")
-        elif rc == 130:
-            print("\nNotebookLM: Abgebrochen. Nichts wurde gespeichert.")
+    if old_profile:
+        if rc == 0:
+            shutil.rmtree(old_profile, ignore_errors=True)
+            print("Das alte Browserprofil ist gelöscht.")
         else:
-            print(f"NotebookLM: Die Anmeldung ist fehlgeschlagen (Exit-Code {rc}).")
+            shutil.rmtree(profile, ignore_errors=True)
+            os.rename(old_profile, profile)
+            print("Das alte Browserprofil ist wiederhergestellt.")
+    if rc != 0:
+        print("NotebookLM: " + NLM_RESULT.get(
+            rc, "Die Anmeldung ist unerwartet fehlgeschlagen (Meldung oben).").format(
+                dauer=nlm_duration(limit)))
+        if rc not in (3, 5, 124, 130):
             print(NLM_FALLBACK)
         return 1
-    print("Übertrage die Anmeldung auf die alte NotebookLM-Adresse "
-          "(notebooklm-fix-cookies) ...", flush=True)
-    ok, out = notebooklm_fix()
-    print(f"notebooklm-fix-cookies: {out or ('fertig' if ok else 'fehlgeschlagen')}")
+    print("Passe die Anmeldung an die neue Adresse von NotebookLM an ...", flush=True)
+    ok, out = notebooklm_fix(storage)
+    if not ok:
+        print(f"Das hat nicht geklappt: {out or 'ohne Meldung'}")
     if test:
         print("Prüfe die NotebookLM-Anmeldung (Testmodus: nur lokal) ...", flush=True)
         state = notebooklm_state(test=False)
@@ -2661,7 +3005,7 @@ Ich warte, bis die Anmeldung erkannt ist (höchstens {nlm_duration(limit)}; Abbr
         return 0
     print("NotebookLM: Die Sitzung ist gespeichert, aber die Prüfung meldet: "
           f"{state['meldung'] or NLM_TEXT[state['zustand']]}.")
-    print("Melden Sie sich noch einmal an, mit zurückgesetztem Browserprofil: "
+    print("Melden Sie sich noch einmal an, mit neuem Browserprofil: "
           "clawbook notebooklm anmelden --neu")
     print(NLM_FALLBACK)
     return 1
@@ -4760,6 +5104,9 @@ def main(argv):
     try:
         if words is None:
             raise CliError(f"Unbekannte Option: {bad} (Hilfe: clawbook --help)", code=2)
+        if (opts["neu"] or opts["zeitgrenze"]) and words != ["notebooklm", "anmelden"]:
+            raise CliError("--neu und --zeitgrenze gibt es nur bei „clawbook notebooklm "
+                           "anmelden“ (Hilfe: clawbook --help)", code=2)
         if not words:
             if opts["json"]:
                 raise CliError("--json braucht einen Befehl, z. B. clawbook status --json",

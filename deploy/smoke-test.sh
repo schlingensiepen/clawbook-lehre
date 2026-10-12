@@ -317,8 +317,9 @@ json_ok "${out}" 'd["zustand"] == "unvollstaendig" and d["reparierbar"] and "rep
 rc=0; out=$(ssh_run 'clawbook notebooklm --yes --json') || rc=$?
 json_ok "${out}" 'd["repariert"] and not d["reparierbar"]' \
   || fail "clawbook notebooklm --yes did not repair the cookies: ${out}"
-ssh_run 'grep -q "notebooklm.google.com" ~/.notebooklm/profiles/default/storage_state.json && rm -rf ~/.notebooklm' \
-  || fail "notebooklm-fix-cookies did not copy the cookies"
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'cd ~/.notebooklm/profiles/default && grep -q "notebooklm.google.com" storage_state.json && test "$(stat -c %a storage_state.json)" = 600 && ! ls ./*.bak ./*.neu 2>/dev/null && rm -rf ~/.notebooklm' \
+  || fail "notebooklm-fix-cookies did not copy the cookies (atomically, 0600, without backup)"
 echo "notebooklm ok"
 
 # Sample project in the WorkspaceManager layout, a git repo owned by student.
@@ -530,22 +531,46 @@ PY
 echo "notebooklm browser ok"
 
 # NotebookLM login by clawbook, in its test mode (no network, Chromium on
-# display :0): a stale profile lock is removed with --yes; the time limit
-# without a login leaves the stored login alone; stand-in session cookies
-# are detected and saved (old file kept, cookies made fit by
-# notebooklm-fix-cookies) and classified locally.
+# display :0). The test mode needs the root-owned marker file. A lock that
+# points to a live foreign process of the student is stale (the process
+# stays); the time limit without a login leaves the stored login alone;
+# NotebookLM sending the browser back to the sign-in saves nothing and
+# brings back the old profile (--neu); stand-in session cookies are
+# detected and saved filtered (two old files kept, 0600, cookies made fit
+# by notebooklm-fix-cookies) and classified locally.
 NLM_DIR=.notebooklm/profiles/default
-ssh_run "mkdir -p ~/${NLM_DIR}/browser_profile && echo '{\"cookies\": [], \"origins\": []}' > ~/${NLM_DIR}/storage_state.json && ln -s anderer-rechner-4242 ~/${NLM_DIR}/browser_profile/SingletonLock" \
+rc=0; out=$(ssh_run 'clawbook status --neu') || rc=$?
+[ "${rc}" = 2 ] || fail "clawbook status --neu was not refused: ${out}"
+docker exec "${NAME}" touch /run/clawbook-nlm-test || fail "could not create the test marker"
+ssh_run "mkdir -p ~/${NLM_DIR}/browser_profile && echo '{\"cookies\": [], \"origins\": []}' > ~/${NLM_DIR}/storage_state.json" \
   || fail "could not prepare the NotebookLM profile"
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'nohup sleep 600 </dev/null >/dev/null 2>&1 & echo $! > ~/nlm-sleep.pid' \
+  || fail "could not start the foreign process"
+ssh_run "ln -s \"\$(hostname)-\$(cat ~/nlm-sleep.pid)\" ~/${NLM_DIR}/browser_profile/SingletonLock && kill -0 \$(cat ~/nlm-sleep.pid)" \
+  || fail "could not lock the NotebookLM profile to a foreign process"
 rc=0; out=$(ssh_run 'CLAWBOOK_NLM_TEST=leer clawbook notebooklm anmelden --yes --zeitgrenze=4') || rc=$?
-if [ "${rc}" != 1 ] || ! has 'veraltete Sperre ist entfernt' \
+if [ "${rc}" != 1 ] || ! has 'TESTMODUS' || ! has 'veraltete Sperre ist entfernt' \
    || ! has 'Innerhalb von 4 Sekunden wurde keine Anmeldung erkannt'; then
-  fail "clawbook notebooklm anmelden: time limit or lock not handled: ${out}"
+  fail "clawbook notebooklm anmelden: time limit or foreign lock not handled: ${out}"
 fi
+# shellcheck disable=SC2016 # expands on the container side
+ssh_run 'kill -0 $(cat ~/nlm-sleep.pid) && kill $(cat ~/nlm-sleep.pid) && rm ~/nlm-sleep.pid' \
+  || fail "clawbook notebooklm anmelden ended a foreign process behind the lock"
 ssh_run "grep -qx '{\"cookies\": \[\], \"origins\": \[\]}' ~/${NLM_DIR}/storage_state.json && ! ls ~/${NLM_DIR}/storage_state.json.alt-* 2>/dev/null" \
   || fail "clawbook notebooklm anmelden changed the stored login after the time limit"
-rc=0; out=$(ssh_run 'CLAWBOOK_NLM_TEST=cookies clawbook notebooklm anmelden --zeitgrenze=60') || rc=$?
-if [ "${rc}" != 0 ] || ! has 'Anmeldung erkannt' || ! has 'NotebookLM: angemeldet'; then
+ssh_run "touch ~/${NLM_DIR}/browser_profile/clawbook-test-alt"
+rc=0; out=$(ssh_run 'CLAWBOOK_NLM_TEST=umweg clawbook notebooklm anmelden --neu --zeitgrenze=5') || rc=$?
+if [ "${rc}" != 1 ] || ! has 'NotebookLM ist noch nicht offen' || ! has 'NotebookLM ist nicht erschienen' \
+   || ! has 'alte Browserprofil ist wiederhergestellt'; then
+  fail "clawbook notebooklm anmelden: detour to the sign-in not handled: ${out}"
+fi
+ssh_run "grep -qx '{\"cookies\": \[\], \"origins\": \[\]}' ~/${NLM_DIR}/storage_state.json && test -f ~/${NLM_DIR}/browser_profile/clawbook-test-alt && ! ls -d ~/${NLM_DIR}/browser_profile.alt-* 2>/dev/null" \
+  || fail "clawbook notebooklm anmelden changed the login or the profile after the detour"
+ssh_run "cd ~/${NLM_DIR} && echo alt1 > storage_state.json.alt-20200101-000000 && echo alt2 > storage_state.json.alt-20200102-000000"
+rc=0; out=$(ssh_run 'CLAWBOOK_NLM_TEST=cookies clawbook notebooklm anmelden --neu --zeitgrenze=60') || rc=$?
+if [ "${rc}" != 0 ] || ! has 'Anmeldung erkannt' || ! has 'NotebookLM: angemeldet' \
+   || ! has 'alte Browserprofil ist gelöscht'; then
   fail "clawbook notebooklm anmelden did not save the stand-in login: ${out}"
 fi
 ssh_run "/opt/uv-tools/notebooklm-py/bin/python - ~/${NLM_DIR}" <<'PY' || fail "NotebookLM login saved wrongly"
@@ -556,9 +581,17 @@ have = {(c["name"], c["domain"]) for c in state["cookies"]}
 need = {("SID", ".google.com"), ("__Secure-1PSIDTS", ".google.com"),
         ("OSID", "notebook.google.com"), ("OSID", "notebooklm.google.com")}
 assert need <= have, have
+assert not [c for c in state["cookies"] if "example.org" in c["domain"]], have
+assert state["origins"] == [], state["origins"]
+assert state.get("notebooklm", {}).get("account_route_cleared") is True, state.get("notebooklm")
 assert stat.S_IMODE(os.stat(os.path.join(d, "storage_state.json")).st_mode) == 0o600
-old = glob.glob(os.path.join(d, "storage_state.json.alt-*"))
-assert len(old) == 1 and json.load(open(old[0])) == {"cookies": [], "origins": []}, old
+old = sorted(glob.glob(os.path.join(d, "storage_state.json.alt-*")))
+assert len(old) == 2 and old[0].endswith("alt-20200102-000000"), old
+assert json.load(open(old[1])) == {"cookies": [], "origins": []}, old
+assert all(stat.S_IMODE(os.stat(o).st_mode) == 0o600 for o in old), old
+assert not glob.glob(os.path.join(d, "*.bak")) and not glob.glob(os.path.join(d, "*.neu"))
+assert not glob.glob(os.path.join(d, "browser_profile.alt-*"))
+assert not os.path.exists(os.path.join(d, "browser_profile", "clawbook-test-alt"))
 PY
 out=$(ssh_run 'clawbook check --json') || fail "clawbook check --json failed"
 json_ok "${out}" '[t.get("zustand") for t in d if t["name"] == "notebooklm-anmeldung"] == ["angemeldet"]' \
@@ -574,6 +607,7 @@ out=$(ssh_run 'clawbook check --json') || fail "clawbook check --json failed"
 json_ok "${out}" '[t.get("zustand") for t in d if t["name"] == "notebooklm-anmeldung"] == ["unvollstaendig"]' \
   || fail "clawbook check --json: unfixed NotebookLM login not seen as unvollstaendig: ${out}"
 ssh_run 'rm -rf ~/.notebooklm'
+docker exec "${NAME}" rm -f /run/clawbook-nlm-test
 echo "notebooklm login ok"
 
 # Samba: share "student" is writable with the password the start shows.
