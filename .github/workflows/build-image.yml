@@ -53,6 +53,13 @@ jobs:
                      deploy/smoke-test.sh
       - name: Check Python scripts
         run: PYTHONPYCACHEPREFIX="${RUNNER_TEMP}/pycache" python3 -m py_compile deploy/rootfs/usr/local/bin/clawbook
+      - name: No internal project references
+        # The product must stand on its own: no decision or requirement
+        # numbers from the maintainers' private notes.
+        run: |
+          if git grep -nE '\b(DEC|REQ|REP|IDEA|BR|REC)-[0-9]{3}\b|\[\[' -- . ':!.github'; then
+            echo "::error::internal references found"; exit 1
+          fi
 
   build:
     needs: lint
