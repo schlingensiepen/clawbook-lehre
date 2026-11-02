@@ -69,7 +69,7 @@ wsl --version
 
 Die erste Zeile zeigt die WSL-Version. Das Skript prüft
 später dieselbe Versionsreihe über den Befehl `wslc` und
-meldet, wenn sie nicht reicht: „Deine WSL-Version ist zu
+meldet, wenn sie nicht reicht: „Ihre WSL-Version ist zu
 alt: wslc 3.x.y, nötig ist mindestens 3.0.1." Ist die
 Version älter als 3.0.1, aktualisieren Sie WSL mit:
 
