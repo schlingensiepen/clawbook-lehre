@@ -1183,12 +1183,27 @@ function Get-LatestVsCode([int]$TimeoutSec = 30, [switch]$NoFallback) {
   return $null
 }
 
+function Get-PackProcesses([string]$Id) {
+  # Names of the running programs that use this course's pack folder: started
+  # from it or naming it on their command line (helpers of VS Code do).
+  $dir = (Get-CourseDir $Id).TrimEnd('\') + '\'
+  try {
+    $all = @(Get-CimInstance -ClassName Win32_Process -Property Name, ExecutablePath, CommandLine -OperationTimeoutSec 15 -ErrorAction Stop)
+  } catch {
+    Log ("Prozessliste: {0}" -f $_.Exception.Message)
+    return @(Get-Process -Name Code -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -and $_.Path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) } |
+        ForEach-Object { "$($_.ProcessName).exe" } | Sort-Object -Unique)
+  }
+  return @($all | Where-Object {
+      ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase)) -or
+      ($_.CommandLine -and $_.CommandLine.IndexOf($dir, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    } | ForEach-Object { $_.Name } | Sort-Object -Unique)
+}
+
 function Test-PackRunning([string]$Id) {
-  # True if a Code.exe from this course's pack folder is running.
-  $dir = Get-CourseDir $Id
-  $p = @(Get-Process -Name Code -ErrorAction SilentlyContinue |
-      Where-Object { $_.Path -and $_.Path.StartsWith($dir, [StringComparison]::OrdinalIgnoreCase) })
-  return ($p.Count -gt 0)
+  # True if something from this course's pack folder is running.
+  return (@(Get-PackProcesses $Id).Count -gt 0)
 }
 
 function Save-Download($Url, $Target) {
@@ -1219,34 +1234,55 @@ function Test-MicrosoftSignature($File) {
   return ("$($sig.Status)" -eq 'Valid' -and $subject -match '(^|,\s*)O=Microsoft Corporation(,|$)')
 }
 
-function Move-PackData($Target, $Previous) {
+function Move-PackData([string]$Id, $Target, $Previous) {
   # Portable mode: all settings and extensions live in data\. It moves to
-  # the new version; the old version stays as a fallback without it.
+  # the new version; the old version stays as a fallback without it. The move
+  # is one rename, so data\ is whole on either side. Offers to retry while
+  # something holds it; returns $false if the user gives up.
   $newData = Join-Path $Target 'data'
-  if (Test-Path -LiteralPath $newData) { return }
   $oldData = if ($Previous) { Join-Path $Previous 'data' } else { '' }
-  if ($oldData -and (Test-Path -LiteralPath $oldData)) {
-    try { Move-Item -LiteralPath $oldData -Destination $newData }
-    catch {
-      Log ("data verschieben: {0}" -f $_.Exception.Message)
-      Fail "Deine VS-Code-Daten ließen sich nicht übernehmen (läuft VS Code noch?). Sie liegen unverändert in $oldData. Schließe alle VS-Code-Fenster und versuche es dann erneut."
-    }
-    Say 'Deine Erweiterungen und Einstellungen sind in die neue Version umgezogen.'
-  } else {
+  $hasOld = $oldData -and (Test-Path -LiteralPath $oldData)
+  if (Test-Path -LiteralPath $newData) {
+    # An empty data\ must not hide the real one in the older version.
+    if (-not $hasOld -or @(Get-ChildItem -Force -LiteralPath $newData).Count -gt 0) { return $true }
+    Remove-Item -Force -LiteralPath $newData
+  }
+  if (-not $hasOld) {
     New-Item -ItemType Directory -Force -Path $newData | Out-Null
+    return $true
+  }
+  while ($true) {
+    try {
+      Move-Item -LiteralPath $oldData -Destination $newData
+      Say 'Ihre Erweiterungen und Einstellungen sind in die neue Version umgezogen.'
+      return $true
+    } catch {
+      Log ("data verschieben: {0}" -f $_.Exception.Message)
+    }
+    Say 'Ihre VS-Code-Daten lassen sich gerade nicht verschieben: Ein Programm greift noch darauf zu.' 'Yellow'
+    $who = @(Get-PackProcesses $Id)
+    if ($who.Count -gt 0) { Say ("Noch aktiv: {0}" -f ($who -join ', ')) 'Yellow' }
+    else { Say 'Prüfen Sie, ob noch ein VS-Code-Fenster oder ein Explorer-Fenster in diesem Ordner offen ist.' 'Yellow' }
+    if ($env:CLAWBOOK_NOPAUSE -eq '1') { return $false }
+    if (-not (Read-YesNo 'Alles geschlossen? Noch einmal versuchen? [J/n]' $true)) { return $false }
   }
 }
 
 function Remove-OldPacks([string]$Id) {
   # Keeps the newest version and one older as fallback; removes the rest
-  # and leftovers of interrupted runs.
+  # and leftovers of interrupted runs. A folder with data\ always stays: it
+  # may hold the only copy of the settings and extensions.
   $dir = Get-CourseDir $Id
   foreach ($t in @(Get-ChildItem -LiteralPath $dir -Directory | Where-Object { $_.Name -like 'vscode-*.tmp' })) {
     Remove-Item -Recurse -Force -LiteralPath $t.FullName -ErrorAction SilentlyContinue
   }
   $all = @(Get-ChildItem -LiteralPath $dir -Directory | Where-Object { $_.Name -match '^vscode-\d+\.\d+\.\d+$' } |
       Sort-Object { [version]($_.Name -replace '^vscode-', '') } -Descending)
-  foreach ($old in @($all | Select-Object -Skip 2)) {
+  $keep = @($all | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'Code.exe') } |
+      Select-Object -First 2 | ForEach-Object { $_.FullName })
+  foreach ($old in $all) {
+    if ($keep -contains $old.FullName) { continue }
+    if (Test-Path -LiteralPath (Join-Path $old.FullName 'data')) { continue }
     Say "Lösche die alte Version $($old.Name) ..."
     try { Remove-Item -Recurse -Force -LiteralPath $old.FullName }
     catch {
@@ -1618,20 +1654,26 @@ function Install-VsCodePack([string]$Id, $Latest = $null, [switch]$StartFollows)
   }
   $installed = @(Get-PackVersions $Id)
   $target = Join-Path $dir ("vscode-{0}" -f $Latest.Version)
-  $previous = @($installed | Where-Object { $_.Path -ne $target } | Select-Object -First 1)
+  # The settings come from the newest other version that has them; a run that
+  # failed earlier can have left a newer version without data\.
+  $previous = @($installed | Where-Object { $_.Path -ne $target -and (Test-Path -LiteralPath (Join-Path $_.Path 'data')) } |
+      Select-Object -First 1)
   $prevPath = if ($previous.Count -gt 0) { $previous[0].Path } else { '' }
 
   if (Test-Path -LiteralPath (Join-Path $target 'Code.exe')) {
     Say ("VS Code {0} ist schon installiert und aktuell. Ich gleiche nur Erweiterungen und Einstellungen ab." -f $Latest.Version) 'Green'
   } else {
-    if (Test-PackRunning $Id) { Fail 'VS Code aus dem VSCodePack läuft noch. Schließe alle VS-Code-Fenster und versuche es dann erneut.' }
+    $running = @(Get-PackProcesses $Id)
+    if ($running.Count -gt 0) {
+      Fail ("VS Code aus dem VSCodePack läuft noch ({0}). Schließen Sie alle VS-Code-Fenster und versuchen Sie es dann erneut." -f ($running -join ', '))
+    }
     Remove-OldPacks $Id
     $free = Get-FreeBytes $dir
     if ($free -ge 0 -and $free -lt 1GB) {
       Fail ("Zu wenig Platz in {0}: VS Code braucht etwa 1 GB, frei sind {1:N1} GB. Schaffe Platz und versuche es dann erneut." -f $dir, ($free / 1GB))
     }
     $tmp = "$target.tmp"
-    if ($prevPath) { Say ("Installiert ist VS Code {0}; neu ist {1}." -f $installed[0].Version, $Latest.Version) }
+    if ($prevPath) { Say ("Installiert ist VS Code {0}; neu ist {1}." -f $previous[0].Version, $Latest.Version) }
     $zip = Get-VsCodeZip $Latest
 
     Say '[3/4] Entpacke VS Code. Das dauert ein bis drei Minuten ...' 'Cyan'
@@ -1655,10 +1697,17 @@ function Install-VsCodePack([string]$Id, $Latest = $null, [switch]$StartFollows)
     Say '[4/4] Richte VS Code ein ...' 'Cyan'
   }
 
+  if (-not (Move-PackData $Id $target $prevPath)) {
+    # Without its data the new version must not stay: [9] would start it empty.
+    # A download of this run stays for the next try.
+    if (-not (Test-Path -LiteralPath (Join-Path $target 'data'))) {
+      Remove-Item -Recurse -Force -LiteralPath $target -ErrorAction SilentlyContinue
+    }
+    Fail "Ihre VS-Code-Daten liegen unverändert in $prevPath\data, die alte Version bleibt nutzbar. Schließen Sie alle VS-Code-Fenster und wählen Sie dann noch einmal Menüpunkt [10]."
+  }
   if (Test-PackRunning $Id) {
     Say 'Hinweis: VS Code aus dem VSCodePack läuft gerade. Neue Einstellungen wirken nach einem Neustart von VS Code.' 'Yellow'
   }
-  Move-PackData $target $prevPath
   $failed = Install-PackExtensions $target $course.Windows
   Set-PackSettings $target $course
   Remove-OldPacks $Id
