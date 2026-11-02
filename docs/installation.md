@@ -210,8 +210,10 @@ Sichern.
 
 3. Das Skript prüft WSL und den OpenSSH-Client und sagt
    Ihnen, wenn etwas fehlt (dann zurück zu Abschnitt 1).
-   Ist WSL zu alt, bietet es `wsl --update` an: mit
-   Enter bestätigen, danach den Befehl erneut ausführen.
+   Ist WSL zu alt, bietet es `wsl --update` an: Mit
+   Enter bestätigen, das Skript macht danach von selbst
+   weiter. Bittet es Sie, ein neues PowerShell-Fenster zu
+   öffnen, führen Sie den Befehl dort erneut aus.
 4. Es erscheint ein Menü. Beim allerersten Mal sieht es
    so aus:
 
@@ -805,13 +807,20 @@ lesen können.
   eingeschaltet, prüfen Sie, ob die Virtualisierung im
   BIOS/UEFI eingeschaltet ist. Einzelheiten in
   Abschnitt 1, „WSL zu Hause installieren".
-- **„Deine WSL-Version ist zu alt: wslc …, nötig ist
+- **„Ihre WSL-Version ist zu alt: wslc …, nötig ist
   mindestens 3.0.1."** — das Skript fragt „Jetzt mit
   ‚wsl --update' aktualisieren? Das geht ohne
-  Administrator-Rechte. [J/n]": Bestätigen Sie mit Enter
-  und führen Sie danach den Befehl aus Abschnitt 2 erneut
-  aus. Dasselbe gilt für „WSL ist installiert, aber zu
-  alt: Das Werkzeug wslc (WSL-Container) fehlt noch."
+  Administrator-Rechte. [J/n]": Bestätigen Sie mit Enter,
+  das Skript macht danach von selbst weiter (wenn nicht,
+  siehe der nächste Eintrag). Dasselbe gilt für „WSL ist
+  installiert, aber zu alt: Das Werkzeug wslc
+  (WSL-Container) fehlt noch."
+- **Das Skript meldet nach `wsl --update` weiter, WSL sei
+  zu alt, oder `wsl --update` sagt, die neueste Version
+  sei bereits installiert** — ein schon offenes
+  PowerShell-Fenster kennt neu installierte Programme oft
+  noch nicht. Öffnen Sie ein neues PowerShell-Fenster und
+  führen Sie den Befehl aus Abschnitt 2 dort aus.
 - **„Der OpenSSH-Client (Befehl ssh) fehlt auf diesem
   Rechner."** — fügen Sie den OpenSSH-Client hinzu, siehe
   Abschnitt 1.

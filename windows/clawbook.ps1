@@ -221,26 +221,67 @@ function Read-YesNo($Prompt, [bool]$DefaultYes) {
   return ($a -match '^[jJyY]')
 }
 
+function Get-Wslc {
+  # Returns the path of wslc or $null. The WSL installer extends the stored
+  # PATH, which only windows opened afterwards see; so this process takes the
+  # missing entries over (ssh and code profit too), and the install folder
+  # counts as well.
+  foreach ($scope in @('Machine', 'User')) {
+    foreach ($entry in ("$([Environment]::GetEnvironmentVariable('Path', $scope))" -split ';')) {
+      $dir = [Environment]::ExpandEnvironmentVariables($entry).Trim().TrimEnd('\')
+      $known = $env:Path -split ';' | ForEach-Object { $_.Trim().TrimEnd('\') }
+      if ($dir -and ($known -notcontains $dir)) { $env:Path = "$env:Path;$dir" }
+    }
+  }
+  $cmd = Get-Command wslc -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($cmd) { return $cmd.Source }
+  foreach ($root in @($env:ProgramW6432, $env:ProgramFiles)) {
+    if ($root) {
+      $file = Join-Path $root 'WSL\wslc.exe'
+      if (Test-Path -LiteralPath $file) { return $file }
+    }
+  }
+  return $null
+}
+
+function Get-WslcVersion {
+  $v = (Invoke-Wslc version).Out
+  if ($v -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] }
+  return [version]'0.0.0'
+}
+
+function Exit-NewWindow($Reason) {
+  Say $Reason 'Yellow'
+  Say 'Öffnen Sie ein neues PowerShell-Fenster und führen Sie den Befehl von der Startseite dort erneut aus.' 'Yellow'
+  Say 'Bleibt die Meldung, wenden Sie sich an die IT Ihrer Hochschule.' 'Yellow'
+  Exit-WithError
+}
+
 function Test-Wslc {
-  if (-not (Get-Command wslc -ErrorAction SilentlyContinue)) {
+  $script:WslcPath = Get-Wslc
+  if (-not $WslcPath) {
     $wsl = Get-Command wsl -ErrorAction SilentlyContinue
     $hasWsl = $wsl -and ((Test-NativeOk $wsl.Source @('--version')) -or (Test-NativeOk $wsl.Source @('--status')))
     if (-not $hasWsl) {
       Say 'WSL (Windows-Subsystem für Linux) ist auf diesem Rechner nicht installiert.' 'Yellow'
-      Say 'Installiere es in PowerShell mit:  wsl --install' 'Yellow'
-      Say 'Dafür braucht man unter Umständen Administrator-Rechte. Hast du sie nicht, frag die IT deiner Hochschule.' 'Yellow'
-      Say 'Starte Windows danach neu und führe den Befehl von der Startseite erneut aus.' 'Yellow'
+      Say 'Installieren Sie es in PowerShell mit:  wsl --install' 'Yellow'
+      Say 'Dafür braucht man unter Umständen Administrator-Rechte. Haben Sie die nicht, fragen Sie die IT Ihrer Hochschule.' 'Yellow'
+      Say 'Starten Sie Windows danach neu und führen Sie den Befehl von der Startseite erneut aus.' 'Yellow'
       Exit-WithError
     }
     Say 'WSL ist installiert, aber zu alt: Das Werkzeug wslc (WSL-Container) fehlt noch.' 'Yellow'
     Update-Wsl
+    $script:WslcPath = Get-Wslc
+    if (-not $WslcPath) { Exit-NewWindow 'WSL ist aktualisiert, das neue Werkzeug wslc ist in diesem Fenster aber noch nicht sichtbar.' }
   }
-  $script:WslcPath = (Get-Command wslc).Source
-  $v = (Invoke-Wslc version).Out
-  $ver = if ($v -match '(\d+\.\d+\.\d+)') { [version]$Matches[1] } else { [version]'0.0.0' }
+  $ver = Get-WslcVersion
   if ($ver -lt $MinWslc) {
-    Say "Deine WSL-Version ist zu alt: wslc $ver, nötig ist mindestens $MinWslc." 'Yellow'
+    Say "Ihre WSL-Version ist zu alt: wslc $ver, nötig ist mindestens $MinWslc." 'Yellow'
     Update-Wsl
+    $script:WslcPath = Get-Wslc
+    if (-not $WslcPath) { Exit-NewWindow 'WSL ist aktualisiert, das neue Werkzeug wslc ist in diesem Fenster aber noch nicht sichtbar.' }
+    $ver = Get-WslcVersion
+    if ($ver -lt $MinWslc) { Exit-NewWindow "WSL ist auch nach dem Update noch zu alt (wslc $ver, nötig ist $MinWslc)." }
   }
   if (-not (Get-Command ssh -ErrorAction SilentlyContinue)) {
     Say 'Hinweis: Der OpenSSH-Client (Befehl ssh) fehlt auf diesem Rechner. Ohne ihn klappen ssh clawbook und VS Code nicht.' 'Yellow'
@@ -250,15 +291,20 @@ function Test-Wslc {
 }
 
 function Update-Wsl {
-  # Offers "wsl --update" (works without administrator rights), then ends.
+  # Offers "wsl --update" (works without administrator rights). Returns after
+  # the update so the caller checks again; a refusal ends the script.
   if (Read-YesNo 'Jetzt mit „wsl --update“ aktualisieren? Das geht ohne Administrator-Rechte. [J/n]' $true) {
     $wsl = Get-Command wsl -ErrorAction SilentlyContinue
-    if ($wsl) { $null = Invoke-Visible $wsl.Source @('--update') }
-    Say 'Führe danach den Befehl von der Startseite erneut aus.' 'Yellow'
-  } else {
-    Say 'Aktualisiere WSL selbst mit:  wsl --update   (geht ohne Administrator-Rechte)' 'Yellow'
-    Say 'Führe danach den Befehl von der Startseite erneut aus.' 'Yellow'
+    if (-not $wsl) { Fail 'Der Befehl wsl ist nicht zu finden.' }
+    $code = Invoke-Visible $wsl.Source @('--update')
+    if ($code -ne 0) {
+      Say "wsl --update ist fehlgeschlagen (Code $code). Prüfen Sie die Internetverbindung und versuchen Sie es erneut." 'Yellow'
+      Exit-WithError
+    }
+    return
   }
+  Say 'Aktualisieren Sie WSL selbst mit:  wsl --update   (geht ohne Administrator-Rechte)' 'Yellow'
+  Say 'Öffnen Sie danach ein neues PowerShell-Fenster und führen Sie den Befehl von der Startseite dort erneut aus.' 'Yellow'
   Exit-WithError
 }
 
@@ -1922,7 +1968,7 @@ if (Test-Path -LiteralPath $CourseFile) {
 try {
   # Installing a VSCodePack works without WSL (then only the base pack).
   if ($Action -ne 'vscode-install') { Test-Wslc }
-  elseif (Get-Command wslc -ErrorAction SilentlyContinue) { $script:WslcPath = (Get-Command wslc).Source }
+  else { $found = Get-Wslc; if ($found) { $script:WslcPath = $found } }
   switch ($Action) {
     'start' { Start-Clawbook }
     'update' { Update-Clawbook }
