@@ -212,8 +212,8 @@ Sichern.
    Ihnen, wenn etwas fehlt (dann zurück zu Abschnitt 1).
    Ist WSL zu alt, bietet es `wsl --update` an: Mit
    Enter bestätigen, das Skript macht danach von selbst
-   weiter. Bittet es Sie, ein neues PowerShell-Fenster zu
-   öffnen, führen Sie den Befehl dort erneut aus.
+   weiter. Öffnet es dafür ein neues PowerShell-Fenster,
+   machen Sie dort weiter und schließen das alte.
 4. Es erscheint ein Menü. Beim allerersten Mal sieht es
    so aus:
 
@@ -819,7 +819,8 @@ lesen können.
   zu alt, oder `wsl --update` sagt, die neueste Version
   sei bereits installiert** — ein schon offenes
   PowerShell-Fenster kennt neu installierte Programme oft
-  noch nicht. Öffnen Sie ein neues PowerShell-Fenster und
+  noch nicht. Das Skript öffnet dann selbst ein neues
+  Fenster; erscheint keines, öffnen Sie selbst eines und
   führen Sie den Befehl aus Abschnitt 2 dort aus.
 - **„Der OpenSSH-Client (Befehl ssh) fehlt auf diesem
   Rechner."** — fügen Sie den OpenSSH-Client hinzu, siehe

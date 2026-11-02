@@ -19,6 +19,8 @@
   (für automatische Tests).
   Umgebungsvariable CLAWBOOK_REF: Branch oder Tag des Repositorys, aus dem
   Dateien geladen werden (Vorgabe main; für Tests).
+  Umgebungsvariable CLAWBOOK_NEWWINDOW=1: setzt das Skript selbst im neuen
+  Fenster nach einem WSL-Update; es öffnet dann kein weiteres.
 
 .PARAMETER Action
   start, update, export, import, ssh, status, stop, reset, vscode,
@@ -250,10 +252,50 @@ function Get-WslcVersion {
   return [version]'0.0.0'
 }
 
+function Get-ContinueCmd {
+  # Text of a batch file that starts this script again in a new window, with
+  # the same image, branch and action; $null if that is not safe. ASCII only:
+  # cmd.exe would misread other characters, so the path uses %LOCALAPPDATA%.
+  if ($Image -notmatch '^[A-Za-z0-9._/:@-]+\z' -or $Ref -notmatch '^[A-Za-z0-9._/-]+\z') { return $null }
+  $call = '"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NoExit -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\clawbook\clawbook.ps1"'
+  $call += " -Image $Image"
+  if ($Action -and -not $File) { $call += " -Action $Action" }
+  if ($Kurs) { $call += " -Kurs $Kurs" }
+  $lines = @('@echo off', 'set CLAWBOOK_NEWWINDOW=1')
+  if ($Ref -ne 'main') { $lines += "set CLAWBOOK_REF=$Ref" }
+  return (($lines + $call) -join "`r`n") + "`r`n"
+}
+
+function Open-NewWindow {
+  # Opens the new window through explorer.exe: a window started from here
+  # would inherit the outdated environment of this one. Returns $true if the
+  # start went through. Only once, so a persisting problem cannot chain windows.
+  if ($env:CLAWBOOK_NEWWINDOW -eq '1' -or $env:CLAWBOOK_NOPAUSE -eq '1') { return $false }
+  if (-not (Test-Path -LiteralPath (Join-Path $AppDir 'clawbook.ps1'))) { return $false }
+  $text = Get-ContinueCmd
+  if (-not $text) { return $false }
+  try {
+    $cmd = Join-Path $AppDir 'weiter.cmd'
+    [IO.File]::WriteAllText($cmd, $text, [Text.Encoding]::ASCII)
+    Start-Process -FilePath 'explorer.exe' -ArgumentList "`"$cmd`""
+    Log "Neues Fenster gestartet: $cmd"
+    return $true
+  } catch {
+    Log "Neues Fenster ging nicht: $_"
+    return $false
+  }
+}
+
 function Exit-NewWindow($Reason) {
   Say $Reason 'Yellow'
-  Say 'Öffnen Sie ein neues PowerShell-Fenster und führen Sie den Befehl von der Startseite dort erneut aus.' 'Yellow'
-  Say 'Bleibt die Meldung, wenden Sie sich an die IT Ihrer Hochschule.' 'Yellow'
+  if (Open-NewWindow) {
+    Say 'Es wird jetzt ein neues PowerShell-Fenster geöffnet. Machen Sie bitte dort weiter; dieses Fenster können Sie danach schließen.' 'Cyan'
+    Say 'Erscheint kein neues Fenster, öffnen Sie selbst eines und führen Sie dort den Befehl von der Startseite aus.' 'Yellow'
+  } else {
+    Say 'Öffnen Sie ein neues PowerShell-Fenster und führen Sie den Befehl von der Startseite dort erneut aus.' 'Yellow'
+    Say 'Hilft das nicht, melden Sie sich in Windows ab und wieder an und führen Sie den Befehl erneut aus.' 'Yellow'
+    Say 'Bleibt die Meldung, wenden Sie sich an die IT Ihrer Hochschule.' 'Yellow'
+  }
   Exit-WithError
 }
 
