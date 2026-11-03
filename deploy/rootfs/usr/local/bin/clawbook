@@ -1722,31 +1722,55 @@ Du bist in clawbook noch nicht bei GitHub angemeldet. Die Anmeldung brauchst
 du für Git: Damit holst du Kurs-Repositorys und lädst deine Arbeit hoch.
 Der WorkspaceManager (wsm) übernimmt deinen GitHub-Namen aus dieser Anmeldung.
 
-So läuft es ab (gh fragt auf Englisch):
-  - „Upload your SSH public key to your GitHub account?“
-    → wähle /home/student/.ssh/id_ed25519.pub
-  - „Title for your SSH key“ → Enter genügt
+So läuft es ab (gh spricht Englisch):
   - gh zeigt einen Code wie ABCD-1234. Drücke Enter, öffne dann
     https://github.com/login/device im Browser unter Windows,
     melde dich bei GitHub an und gib den Code ein.
+  - Den SSH-Schlüssel dieses Containers hinterlegt clawbook danach
+    selbst bei GitHub; dazu musst du nichts eingeben.
 """
 
 GITHUB_SSH_HINT = """\
-Hinweis: GitHub kennt den SSH-Schlüssel dieses Containers noch nicht. Git über
-SSH (so arbeitet wsm) klappt erst danach. Hinterlegen mit:
+Hinweis: GitHub kennt den SSH-Schlüssel dieses Containers noch nicht; das
+Hinterlegen hat nicht geklappt. Git über SSH (so arbeitet wsm) klappt erst
+danach. Von Hand hinterlegen mit:
   gh auth refresh -s admin:public_key
   gh ssh-key add ~/.ssh/id_ed25519.pub --title clawbook"""
 
 
+def github_ssh_key_add():
+    """Uploads the container's public key to the GitHub account (the login
+    requested the scope admin:public_key for this). True when GitHub accepts
+    the key over SSH afterwards. Never prints the key."""
+    pub = key_path() + ".pub"
+    if not os.path.isfile(pub):
+        return False
+    # Title: tells two containers on one account apart without a prompt.
+    host = re.sub(r"[^A-Za-z0-9.-]", "", socket.gethostname()) or "container"
+    title = f"clawbook {host} {datetime.date.today().isoformat()}"
+    rc, out = run(as_user(["gh", "ssh-key", "add", pub, "--title", title]), timeout=30)
+    if rc != 0 and "already" not in out.lower():
+        return False
+    # GitHub may take a moment before a new key works for SSH.
+    for attempt in range(4):
+        if attempt:
+            time.sleep(3)
+        if github_ssh_ok():
+            return True
+    return False
+
+
 def github_login():
-    """Runs the gh login (device code in the browser). True when logged in."""
+    """Runs the gh login (device code in the browser). True when logged in.
+    gh skips its own SSH-key questions; clawbook uploads the key itself."""
     env = dict(os.environ)
     if not in_vscode():
         # No browser reachable from an SSH terminal (a browser in the RDP
         # session would stay unseen): gh only prints the address.
         env["GH_BROWSER"] = "echo Adresse für den Browser unter Windows:"
     cmd = as_user(["gh", "auth", "login", "--hostname", GH_HOST, "--git-protocol", "ssh",
-                   "--web", "--insecure-storage"])
+                   "--web", "--insecure-storage", "--skip-ssh-key",
+                   "--scopes", "admin:public_key"])
     print()
     try:
         rc = subprocess.run(cmd, env=env, check=False).returncode
@@ -1764,7 +1788,9 @@ def github_login():
     github_known_hosts()
     print()
     print(f"Bei GitHub angemeldet als {state['benutzer'] or 'unbekannt'}.")
-    if not github_ssh_ok():
+    if github_ssh_ok() or github_ssh_key_add():
+        print("SSH-Schlüssel dieses Containers ist bei GitHub hinterlegt.")
+    else:
         print(GITHUB_SSH_HINT)
     git_identity_offer()
     return True

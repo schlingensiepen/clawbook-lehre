@@ -119,21 +119,14 @@ Deine Wahl [1]:
 ```
 
 Drücken Sie **Enter** (oder `1`). Die Anmeldung
-übernimmt das Werkzeug `gh`; es fragt auf Englisch:
+übernimmt das Werkzeug `gh`; es spricht Englisch:
 
-1. **„Upload your SSH public key to your GitHub
-   account?"** → wählen Sie mit den Pfeiltasten
-   `/home/student/.ssh/id_ed25519.pub` und drücken Sie
-   Enter. Das ist der SSH-Schlüssel Ihres Containers;
-   GitHub lernt ihn dabei kennen, und `git` arbeitet
-   danach über SSH ohne Passwort.
-2. **„Title for your SSH key"** → Enter genügt.
-3. `gh` zeigt einen Code wie `ABCD-1234` und bittet,
+1. `gh` zeigt einen Code wie `ABCD-1234` und bittet,
    Enter zu drücken. Drücken Sie Enter. Statt einen
    Browser zu öffnen, zeigt der Container die Adresse:
    „Adresse für den Browser unter Windows:
    https://github.com/login/device".
-4. Öffnen Sie <https://github.com/login/device> im
+2. Öffnen Sie <https://github.com/login/device> im
    **Browser unter Windows**, melden Sie sich bei
    GitHub an, geben Sie den Code ein und erlauben Sie
    den Zugriff („Authorize"). Das Terminal wartet,
@@ -141,11 +134,17 @@ Drücken Sie **Enter** (oder `1`). Die Anmeldung
    Terminal geht, steht in der
    [Übersicht](README.md), „So klappt die Anmeldung im
    Browser".
-5. Zurück im Terminal meldet `clawbook`: „Bei GitHub
-   angemeldet als <Ihr-Name>." Gleich danach schlägt
-   es Name und E-Mail-Adresse für `git` vor (nächster
-   Abschnitt). Danach erscheint das clawbook-Menü; mit
-   `0` kommen Sie in die normale Eingabezeile.
+3. Zurück im Terminal meldet `clawbook`: „Bei GitHub
+   angemeldet als <Ihr-Name>." und „SSH-Schlüssel
+   dieses Containers ist bei GitHub hinterlegt." Den
+   Schlüssel (`/home/student/.ssh/id_ed25519.pub`)
+   lädt `clawbook` selbst zu Ihrem GitHub-Konto hoch;
+   `gh` stellt dazu keine Fragen. Danach arbeitet
+   `git` über SSH ohne Passwort. Gleich darauf schlägt
+   `clawbook` Name und E-Mail-Adresse für `git` vor
+   (nächster Abschnitt). Danach erscheint das
+   clawbook-Menü; mit `0` kommen Sie in die normale
+   Eingabezeile.
 
 **Noch kein GitHub-Konto?** Dann legen Sie es jetzt
 an, wie oben unter [Konto anlegen](#konto-anlegen)
@@ -232,20 +231,23 @@ direkt anmelden, zum Beispiel im VS-Code-Terminal:
 gh auth login --hostname github.com --git-protocol ssh --web
 ```
 
-Die Fragen sind dieselben wie oben: Schlüssel
-`/home/student/.ssh/id_ed25519.pub` hochladen, Titel
-mit Enter, Code unter <https://github.com/login/device>
-eingeben. Am Ende meldet `gh` „Logged in as
-<Ihr-Name>". Beim ersten `ssh -T git@github.com` (siehe
-„Prüfen") fragt SSH auf diesem Weg einmal, ob es
-GitHub vertrauen soll — antworten Sie mit `yes`. Der
-Weg über `clawbook` trägt GitHub dagegen schon vorher
-als bekannten Rechner ein.
+Auf diesem Weg fragt `gh` selbst nach dem SSH-Schlüssel:
+„Upload your SSH public key to your GitHub account?" →
+mit den Pfeiltasten `/home/student/.ssh/id_ed25519.pub`
+wählen und Enter drücken; „Title for your SSH key" →
+Enter genügt. Dann den Code unter
+<https://github.com/login/device> eingeben. Am Ende
+meldet `gh` „Logged in as <Ihr-Name>". Beim ersten
+`ssh -T git@github.com` (siehe „Prüfen") fragt SSH auf
+diesem Weg einmal, ob es GitHub vertrauen soll —
+antworten Sie mit `yes`. Der Weg über `clawbook` trägt
+GitHub dagegen schon vorher als bekannten Rechner ein
+und hinterlegt den Schlüssel ohne Rückfrage.
 
 ### Neuer SSH-Schlüssel: neu bei GitHub hinterlegen
 
-GitHub kennt den Schlüssel, den Sie bei der Anmeldung
-hochgeladen haben. Erzeugen Sie im Container einen
+GitHub kennt den Schlüssel, den `clawbook` bei der
+Anmeldung hinterlegt hat. Erzeugen Sie im Container einen
 neuen (`clawbook key new` oder Menüpunkt 3, dann `n`),
 klappt Git über SSH erst wieder, wenn Sie den neuen
 Schlüssel bei GitHub hinterlegen. `clawbook` erinnert
@@ -344,10 +346,11 @@ GitHub-Konto unter Settings → Copilot.
   wählen oder `clawbook github login` eingeben und
   neu beginnen.
 - **Nach der Anmeldung: „Hinweis: GitHub kennt den
-  SSH-Schlüssel dieses Containers noch nicht."** → Sie
-  haben beim Hochladen „Skip" gewählt, oder GitHub hat
-  den Schlüssel noch nicht übernommen. Hinterlegen Sie
-  ihn mit den beiden Befehlen, die der Hinweis nennt:
+  SSH-Schlüssel dieses Containers noch nicht."** →
+  `clawbook` konnte den Schlüssel nicht hinterlegen,
+  etwa weil GitHub gerade nicht erreichbar war oder die
+  Berechtigung dafür fehlte. Hinterlegen Sie ihn von
+  Hand mit den beiden Befehlen, die der Hinweis nennt:
 
   ```bash
   gh auth refresh -s admin:public_key
@@ -387,8 +390,8 @@ GitHub-Konto unter Settings → Copilot.
   (Zurücksetzen oder neuer Rechner ohne Sicherung):
   Dann sind alle Zugänge weg und müssen neu
   eingerichtet werden (siehe [Pflege](../pflege.md)).
-  Melden Sie sich neu an; der neue SSH-Schlüssel wird
-  dabei gleich mit hochgeladen.
+  Melden Sie sich neu an; den neuen SSH-Schlüssel
+  hinterlegt `clawbook` dabei gleich mit.
 - **Zwei-Faktor-Code wird nicht akzeptiert** → Die Uhr
   des Handys geht falsch (Authenticator-Codes hängen
   an der Uhrzeit) — automatische Zeit einschalten.
