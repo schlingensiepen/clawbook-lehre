@@ -398,8 +398,11 @@ ein Kurs steht.
 
 Ein einzelnes Technikpaket bekommt kein eigenes
 VSCodePack. Seine Erweiterungen kommen in alle
-VSCodePacks, sobald Sie sie mit **[10]**, dann **[1]**,
-aktualisieren.
+VSCodePacks: Beim nächsten **[9]** oder **[1]** gleicht
+das Skript die vorhandenen VSCodePacks ab („Die
+Beschreibung des VSCodePacks … hat sich geändert; ich
+gleiche Erweiterungen und Einstellungen ab."); dasselbe
+tut **[10]**, dann **[1]**.
 
 Dasselbe geht ohne Menü:
 

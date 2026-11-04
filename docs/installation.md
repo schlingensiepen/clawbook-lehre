@@ -292,7 +292,7 @@ ausführlich.
 
 ### Das Menü ab dem zweiten Aufruf
 
-Die Menüpunkte [9] bis [11] gibt es erst, wenn der erste
+Die Menüpunkte [9] bis [12] gibt es erst, wenn der erste
 Start aus diesem Abschnitt einmal durchgelaufen ist (das
 Home-Volume also vorhanden ist). Ab dann zeigt der Befehl
 aus Abschnitt 2 das vollständige Menü:
@@ -311,6 +311,7 @@ clawbook – was möchtest du tun?
   [9] VS Code starten
  [10] VSCodePacks einrichten
  [11] Kurse und Technikpakete
+ [12] tmux-helper starten (tmux-Sitzungen als Tabs)
   [0] beenden
 Auswahl [1]
 ```
@@ -318,8 +319,10 @@ Auswahl [1]
 Für die Installation brauchen Sie daraus nur Punkt [9]
 (Abschnitt 5). Punkt [11] fügt Werkzeuge für eine
 Lehrveranstaltung hinzu; das erklärt
-[Kurse und Technikpakete](kurse-und-pakete.md). Alles
-andere steht in der [Pflege-Anleitung](pflege.md).
+[Kurse und Technikpakete](kurse-und-pakete.md). Punkt
+[12] öffnet die tmux-Sitzungen des Containers als Tabs
+(Abschnitt 4). Alles andere steht in der
+[Pflege-Anleitung](pflege.md).
 
 ### Was das Skript auf Ihrem Rechner eingerichtet hat
 
@@ -427,6 +430,34 @@ Für die tägliche Arbeit brauchen Sie dieses Terminal nicht
 unbedingt: VS Code (Abschnitt 5) bringt ein eigenes
 Terminal mit, das genauso im Container läuft.
 
+### tmux-Sitzungen als Tabs: Menüpunkt [12]
+
+Agenten laufen im Container gern lange in tmux-Sitzungen
+(`wsm` startet sie darin). **[12] tmux-helper starten**
+öffnet diese Sitzungen als Tabs im Windows Terminal:
+Das Skript startet den Container, falls nötig, lädt beim
+ersten Mal das Programm
+[tmux-helper](https://github.com/schlingensiepen/tmux-helper)
+(ein eigenes Projekt, etwa 15 MB) von GitHub nach
+`%LOCALAPPDATA%\clawbook\tmux-helper\`, prüft anhand der
+veröffentlichten Prüfsumme, ob der Download vollständig
+angekommen ist, trägt den Host
+`clawbook` in dessen Host-Liste ein und startet es in
+einem eigenen Fenster. Gibt es eine neuere Fassung, lädt
+das Skript sie beim nächsten [12]; ohne Internet nimmt es
+die gespeicherte. In tmux-helper wählen Sie den Host
+`clawbook`; Enter öffnet alle laufenden Sitzungen als
+Tabs, `n` fügt einen weiteren Host hinzu.
+
+Dafür braucht der Rechner **Windows Terminal** (`wt.exe`);
+ab Windows 11 ist es dabei. Fehlt es (etwa auf
+Poolrechnern mit Windows Server), sagt das Skript das und
+nennt den Weg: Microsoft Store (<https://aka.ms/terminal>)
+oder `winget install Microsoft.WindowsTerminal` — je nach
+Rechner mit Administrator-Rechten oder über die IT Ihrer
+Hochschule. Ohne Windows Terminal startet tmux-helper auf
+Nachfrage trotzdem, zeigt die Sitzungen aber nur an.
+
 ## 5. Verbinden mit VS Code
 
 Mit Visual Studio Code bearbeiten Sie Ihre Projekte im
@@ -439,9 +470,12 @@ Das Verwaltungs-Skript richtet dafür ein eigenes,
 fertig eingestelltes VS Code ein — das **VSCodePack**. Es
 liegt getrennt von allem, was sonst auf dem Rechner
 installiert ist, braucht keine Administrator-Rechte, hat
-die Erweiterung **Remote - SSH** schon an Bord, kennt
-`clawbook` als Linux-Rechner und sendet keine
-Nutzungsdaten an Microsoft (Telemetrie aus). Ein
+die Erweiterungen **Remote - SSH** und **tmux Sessions**
+(tmux-Sitzungen des Containers in VS Code öffnen) schon an
+Bord, kennt `clawbook` als Linux-Rechner und sendet keine
+Nutzungsdaten an Microsoft (Telemetrie aus). Im Container
+richtet es beim ersten Verbinden die Python-Werkzeuge und
+**Foam** (Notizen und Wissensbasis in Markdown) ein. Ein
 VS Code, das Sie vielleicht schon haben, bleibt
 unberührt.
 
@@ -496,7 +530,9 @@ PowerShell-Fenster so lange offen.
      Minuten …" — nach
      `%LOCALAPPDATA%\clawbook\vscode\clawbook\vscode-<version>`.
    - „[4/4] Richte VS Code ein …" — installiert die
-     Erweiterung Remote - SSH, setzt die Einstellungen
+     Erweiterungen Remote - SSH und tmux Sessions, setzt
+     die Einstellungen (darunter die Erweiterungen für den
+     Container, etwa Foam)
      und legt im Startmenü den Eintrag **„clawbook VS
      Code"** an: „Verknüpfung ‚clawbook VS Code' im
      Startmenü angelegt. Sie startet zuerst den Container

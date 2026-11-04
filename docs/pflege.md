@@ -613,10 +613,14 @@ irm https://raw.githubusercontent.com/schlingensiepen/clawbook-lehre/main/get-cl
 
 Im Menü heißt Punkt [2] dann nicht mehr „auf das neueste
 Image aktualisieren", sondern **„[2] auf das Image <tag>
-wechseln (Testmodus)"**. Wählen Sie ihn: Das Skript legt
-den Container mit dieser Version an, Ihr Home bleibt.
-„[6] Status anzeigen" zeigt die Version unter „Gewünschtes
-Image" und „Benutztes Image".
+wechseln (Testmodus)"**. Hat der Container noch ein
+anderes Image, ist dieser Punkt die Vorgabe: Über dem
+Menü steht „Der Container läuft noch mit `<alt>`; mit
+Enter wechseln Sie auf `<tag>`.", und Enter wechselt. Das Skript
+legt den Container mit dieser Version an, Ihr Home
+bleibt. Läuft schon die gewünschte Version, bleibt [1]
+die Vorgabe. „[6] Status anzeigen" zeigt die Version
+unter „Gewünschtes Image" und „Benutztes Image".
 
 Die Einstellung gilt nur für dieses PowerShell-Fenster
 (oder bis `Remove-Item Env:CLAWBOOK_IMAGE`). Der nächste

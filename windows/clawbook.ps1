@@ -11,6 +11,8 @@
     - je Kurs ein portables VS Code (VSCodePack) bei Microsoft laden,
       einrichten und mit dem Container verbinden
     - das Menü für Kurse und Technikpakete im Container öffnen
+    - tmux-helper laden und starten (tmux-Sitzungen des Containers als
+      Tabs im Windows Terminal)
 
   Normalerweise startet man es über den Befehl von der Startseite des
   Repositorys; ohne Parameter erscheint ein Menü.
@@ -101,6 +103,18 @@ $RestoreWaitMinutes = 10
 $RestoreWaited = $false
 $PacksSynced = $false
 $LeaveMenu = $false
+
+# tmux-helper (Open-TmuxTabs): opens the tmux sessions of the container as
+# tabs in Windows Terminal. A separate project (Apache-2.0); menu [12]
+# fetches its exe from the GitHub releases on first use, checks it against
+# the published SHA-256 and keeps it with the tag it came from.
+$TmuxHelperDir = Join-Path $AppDir 'tmux-helper'
+$TmuxHelperExe = Join-Path $TmuxHelperDir 'open-tmux-tabs.exe'
+$TmuxHelperTagFile = Join-Path $TmuxHelperDir 'version.txt'
+$TmuxHelperApi = 'https://api.github.com/repos/schlingensiepen/tmux-helper/releases/latest'
+$TmuxHelperReleases = 'https://github.com/schlingensiepen/tmux-helper/releases'
+# Its host list: a JSON list of { ssh_target, display_name, last_used, use_count }.
+$TmuxHelperHosts = Join-Path $env:APPDATA 'Open-TmuxTabs\hosts.json'
 
 # Lowest interface version of the CLI "clawbook" in the container this
 # script uses; older images get the old way and a hint to update.
@@ -785,6 +799,22 @@ function Get-UsedImage($InspectText) {
   if ($readable.Count -gt 0) { return $readable[0] }
   if ($names.Count -gt 0) { return $names[0] }
   return 'unbekannt'
+}
+
+function ConvertTo-ImageKey([string]$Name) {
+  # Comparable form of an image name: lower case, without a docker.io/ or
+  # library/ prefix; '' for a sha256 id or an unknown name.
+  $n = "$Name".Trim().ToLowerInvariant()
+  if ($n -eq '' -or $n -eq 'unbekannt' -or $n -match '^sha256:') { return '' }
+  return (($n -replace '^docker\.io/', '') -replace '^library/', '')
+}
+
+function Test-ImageSwitch([string]$Wanted, $State) {
+  # Test mode (an image other than :latest) and the existing container has
+  # a readable image name that differs: Enter should switch (menu [2]).
+  if ($Wanted -like '*:latest' -or -not $State.Exists) { return $false }
+  $used = ConvertTo-ImageKey (Get-UsedImage $State.Inspect)
+  return [bool]($used -and $used -ne (ConvertTo-ImageKey $Wanted))
 }
 
 function Show-Status {
@@ -1792,7 +1822,39 @@ function Sync-Packs([switch]$StartFollows) {
       if (Read-YesNo $q $true) { $c.Id }
     })
   $null = Install-MissingPacks $wanted -StartFollows:$StartFollows
+  Sync-PackContents (@($DefaultCourse) + @($info.Courses | ForEach-Object { $_.Id }))
   Remove-OrphanPacks $info.Courses
+}
+
+function Sync-PackContents([string[]]$Ids) {
+  # Existing packs follow a changed course description (new extensions of
+  # the base pack or of a technology package, settings) without a full
+  # update via menu [10]. Only the container is asked (never the GitHub
+  # fallback) and only for packs whose course it knows. The copy next to
+  # the pack is replaced after the extensions went in, so a failed install
+  # is tried again on the next run.
+  foreach ($p in @(Get-InstalledPacks)) {
+    if ($Ids -notcontains $p.Id) { continue }
+    $cache = Join-Path (Get-CourseDir $p.Id) 'vscode.json'
+    $old = if (Test-Path -LiteralPath $cache) { [IO.File]::ReadAllText($cache) } else { '' }
+    $text = $null
+    try { $text = Get-CourseJsonFromContainer $p.Id }
+    catch { Log ("Kursbeschreibung {0} aus dem Container nicht ladbar: {1}" -f $p.Id, $_.Exception.Message) }
+    if (-not $text -or $text -eq $old) { continue }
+    $course = ConvertFrom-CourseJson $text $p.Id
+    if (-not $course) { continue }
+    Say ('Die Beschreibung des VSCodePacks „{0}“ hat sich geändert; ich gleiche Erweiterungen und Einstellungen ab.' -f $p.Title) 'Cyan'
+    if (Test-PackRunning $p.Id) {
+      Say 'Hinweis: VS Code aus dem VSCodePack läuft gerade. Neue Einstellungen wirken nach einem Neustart von VS Code.' 'Yellow'
+    }
+    $failed = Install-PackExtensions $p.Path $course.Windows
+    Set-PackSettings $p.Path $course
+    if ($failed -gt 0) {
+      Say 'Nicht alle Erweiterungen ließen sich installieren. Ich versuche es beim nächsten Start wieder; sonst hilft Menüpunkt [10].' 'Yellow'
+      continue
+    }
+    [IO.File]::WriteAllText($cache, $text, $Utf8NoBom)
+  }
 }
 
 function Confirm-ContainerForPacks {
@@ -1989,6 +2051,176 @@ function Show-PackStatus {
   }
 }
 
+# --- tmux-helper -----------------------------------------------------------
+function ConvertTo-TagVersion([string]$Tag) {
+  # 'v2.0.0' -> [version]2.0.0; $null if the tag is no plain version.
+  if ($Tag -match '^v?(\d+\.\d+(\.\d+){0,2})$') { return [version]$Matches[1] }
+  return $null
+}
+
+function Test-TagNewer([string]$Have, [string]$Latest) {
+  # True if $Latest names a newer release than the stored $Have.
+  if (-not $Latest) { return $false }
+  if (-not $Have) { return $true }
+  $a = ConvertTo-TagVersion $Have
+  $b = ConvertTo-TagVersion $Latest
+  if ($a -and $b) { return ($b -gt $a) }
+  return ($Have -ne $Latest)
+}
+
+function Get-TmuxHelperLatestTag([int]$TimeoutSec = 10) {
+  # Tag of the newest release on GitHub (unauthenticated), '' if unreachable.
+  Enable-Tls12
+  try {
+    $j = Invoke-RestMethod -UseBasicParsing -TimeoutSec $TimeoutSec -Uri $TmuxHelperApi
+    if ("$($j.tag_name)" -match '^[A-Za-z0-9][A-Za-z0-9._-]*$') {
+      Log "tmux-helper neueste Version: $($j.tag_name)"
+      return "$($j.tag_name)"
+    }
+    Log 'tmux-helper: unerwartete Antwort von GitHub'
+  } catch { Log ("tmux-helper: GitHub nicht erreichbar: {0}" -f $_.Exception.Message) }
+  return ''
+}
+
+function Test-Sha256File([string]$File, [string]$ShaFile, [string]$Name) {
+  # Compares the file with a sha256sum-style file: "<sha256>  <name>",
+  # "<sha256> *<name>" or a bare "<sha256>" line. Guards against a broken
+  # or truncated download.
+  $text = ''
+  try { $text = [IO.File]::ReadAllText($ShaFile) } catch { $text = '' }
+  if ($text -notmatch ('(?im)^\s*([0-9a-f]{64})(\s+\*?' + [regex]::Escape($Name) + ')?\s*$')) {
+    Log "tmux-helper: Prüfsummendatei nicht lesbar: $text"
+    return $false
+  }
+  $expected = $Matches[1]
+  $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $File).Hash
+  if ($hash -ne $expected) { Log "SHA-256 erwartet $expected, erhalten $hash"; return $false }
+  return $true
+}
+
+function Install-TmuxHelper {
+  # Fetches the exe on first use and when GitHub has a newer release;
+  # offline, the stored copy is used. Returns $true if the exe is ready.
+  $have = ''
+  if ((Test-Path -LiteralPath $TmuxHelperExe) -and (Test-Path -LiteralPath $TmuxHelperTagFile)) {
+    try { $have = ([IO.File]::ReadAllText($TmuxHelperTagFile)).Trim() } catch { $have = '' }
+  }
+  $latest = Get-TmuxHelperLatestTag
+  if ($have -and -not (Test-TagNewer $have $latest)) { Log "tmux-helper $have ist aktuell"; return $true }
+  if (-not $latest) {
+    if ($have) { Say "GitHub ist gerade nicht erreichbar; ich nehme den gespeicherten tmux-helper $have." 'Yellow'; return $true }
+    # The release page may answer although the API does not.
+    $latest = 'latest'
+  }
+  $base = if ($latest -eq 'latest') { "$TmuxHelperReleases/latest/download" } else { "$TmuxHelperReleases/download/$latest" }
+  New-Item -ItemType Directory -Force -Path $TmuxHelperDir | Out-Null
+  $name = Split-Path -Leaf $TmuxHelperExe
+  $part = "$TmuxHelperExe.part"
+  $sha = "$TmuxHelperExe.sha256"
+  $label = if ($latest -eq 'latest') { '' } else { " $latest" }
+  if ($have) { Say ("Lade tmux-helper{0} von GitHub (bisher {1}, etwa 15 MB) ..." -f $label, $have) 'Cyan' }
+  else { Say ("Lade tmux-helper{0} von GitHub (etwa 15 MB, nur beim ersten Mal) ..." -f $label) 'Cyan' }
+  $ok = (Save-Download "$base/$name.sha256" $sha) -and (Save-Download "$base/$name" $part) -and (Test-Path -LiteralPath $part)
+  if (-not $ok) {
+    Remove-Item -Force -LiteralPath $part, $sha -ErrorAction SilentlyContinue
+    if ($have) { Say "Der Download hat nicht geklappt; ich nehme den gespeicherten tmux-helper $have." 'Yellow'; return $true }
+    Say 'Der Download von tmux-helper ist fehlgeschlagen. Prüfen Sie die Internetverbindung und versuchen Sie es dann erneut.' 'Yellow'
+    return $false
+  }
+  Say 'Prüfe die heruntergeladene Datei ...'
+  if (-not (Test-Sha256File $part $sha $name)) {
+    # Only the fresh download goes; a copy that worked before stays.
+    Remove-Item -Force -LiteralPath $part, $sha -ErrorAction SilentlyContinue
+    Say 'Die heruntergeladene Datei von tmux-helper ist unvollständig oder beschädigt (die Prüfsumme stimmt nicht). Ich habe sie gelöscht; versuchen Sie es später noch einmal mit Menüpunkt [12].' 'Yellow'
+    if ($have) { Say "Die gespeicherte Fassung $have bleibt erhalten." 'Yellow' }
+    return $false
+  }
+  Remove-Item -Force -LiteralPath $sha -ErrorAction SilentlyContinue
+  Move-Item -Force -LiteralPath $part -Destination $TmuxHelperExe
+  [IO.File]::WriteAllText($TmuxHelperTagFile, "$latest`r`n", $Utf8NoBom)
+  Say "tmux-helper $latest liegt in $TmuxHelperDir" 'Green'
+  return $true
+}
+
+function Test-TmuxHelperRunning {
+  return (@(Get-Process -Name 'open-tmux-tabs' -ErrorAction SilentlyContinue).Count -gt 0)
+}
+
+function Add-TmuxHelperHost {
+  # Enters the SSH alias "clawbook" into tmux-helper's host list the way
+  # its own "new host" does (display name user@alias, last_used "",
+  # use_count 0); other entries stay as they are. Not while tmux-helper
+  # runs (it writes the file itself), and never a half-written file: the
+  # new text lands in a temp file that replaces the old one. The first
+  # change keeps a copy hosts.json.bak. If the list is unreadable, the user
+  # adds the host in tmux-helper with the key n.
+  $hint = 'Fügen Sie den Host dann in tmux-helper selbst hinzu: Taste n, Eingabe clawbook.'
+  $list = @()
+  $hasFile = Test-Path -LiteralPath $TmuxHelperHosts
+  if ($hasFile) {
+    try {
+      $text = ([IO.File]::ReadAllText($TmuxHelperHosts)).TrimStart([char]0xFEFF).Trim()
+      if ($text -ne '') {
+        if (-not $text.StartsWith('[')) { throw 'keine Liste' }
+        $list = @(foreach ($e in (ConvertFrom-Json -InputObject $text)) { $e })
+      }
+    } catch {
+      Log ("tmux-helper hosts.json nicht lesbar: {0}" -f $_.Exception.Message)
+      Say "Hinweis: Die Host-Liste von tmux-helper ($TmuxHelperHosts) ist nicht lesbar. $hint" 'Yellow'
+      return
+    }
+  }
+  if (@($list | Where-Object { "$($_.ssh_target)" -eq $Container }).Count -gt 0) { return }
+  if (Test-TmuxHelperRunning) {
+    Say "Hinweis: tmux-helper läuft schon; solange ändere ich seine Host-Liste nicht. Beenden Sie es vorher, oder: $hint" 'Yellow'
+    return
+  }
+  $list += [pscustomobject]@{ ssh_target = $Container; display_name = "student@$Container"; last_used = ''; use_count = 0 }
+  $dir = Split-Path -Parent $TmuxHelperHosts
+  $tmp = Join-Path $dir ('hosts.json.{0}.tmp' -f $PID)
+  try {
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $bak = "$TmuxHelperHosts.bak"
+    if ($hasFile -and -not (Test-Path -LiteralPath $bak)) { Copy-Item -LiteralPath $TmuxHelperHosts -Destination $bak }
+    [IO.File]::WriteAllText($tmp, (ConvertTo-Json -InputObject @($list) -Depth 5), $Utf8NoBom)
+    Move-Item -Force -LiteralPath $tmp -Destination $TmuxHelperHosts
+    Say "Host 'clawbook' in die Host-Liste von tmux-helper eingetragen."
+  } catch {
+    Remove-Item -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+    Log ("tmux-helper hosts.json schreiben: {0}" -f $_.Exception.Message)
+    Say "Hinweis: Die Host-Liste von tmux-helper ließ sich nicht schreiben. $hint" 'Yellow'
+  }
+}
+
+function Test-SshAlias {
+  # True if the key and the host entry "clawbook" of this script are there.
+  if (-not (Test-Path -LiteralPath $KeyFile) -or -not (Test-Path -LiteralPath $SshConfig)) { return $false }
+  return ([IO.File]::ReadAllText($SshConfig) -match ('(?m)^Host ' + $Container + '\s*$'))
+}
+
+function Start-TmuxHelper {
+  # Menu [12]: container first (the sessions live there), then tmux-helper
+  # in its own window; this script does not wait for it.
+  if (-not (Get-State).Running) {
+    Say 'Der Container läuft nicht – ich starte ihn zuerst.' 'Yellow'
+    Start-Clawbook
+  } elseif (-not (Test-SshAlias)) {
+    Set-Ssh
+  }
+  if (-not (Install-TmuxHelper)) { return }
+  if (-not (Get-Command wt.exe -ErrorAction SilentlyContinue)) {
+    Say 'Windows Terminal (wt.exe) fehlt auf diesem Rechner. tmux-helper braucht es, um die Sitzungen als Tabs zu öffnen; ohne Windows Terminal zeigt es die Sitzungen nur an.' 'Yellow'
+    Say 'Installieren Sie es aus dem Microsoft Store (https://aka.ms/terminal) oder mit:  winget install Microsoft.WindowsTerminal' 'Yellow'
+    Say 'Je nach Rechner braucht das Administrator-Rechte; auf Poolrechnern fragen Sie die IT Ihrer Hochschule.' 'Yellow'
+    if (-not (Read-YesNo 'tmux-helper trotzdem starten? [j/N]' $false)) { Say 'Abgebrochen.'; return }
+  }
+  Add-TmuxHelperHost
+  Log "Starte $TmuxHelperExe"
+  try { Start-Process -FilePath $TmuxHelperExe -WorkingDirectory $TmuxHelperDir | Out-Null }
+  catch { Log ("tmux-helper starten: {0}" -f $_.Exception.Message); Fail 'tmux-helper ließ sich nicht starten. Einzelheiten stehen im Protokoll.' }
+  Say "tmux-helper öffnet sich in einem eigenen Fenster. Wählen Sie dort den Host 'clawbook'; Enter öffnet seine tmux-Sitzungen als Tabs im Windows Terminal." 'Green'
+}
+
 function Show-Menu {
   while ($true) {
     $s = Get-State
@@ -2009,9 +2241,21 @@ function Show-Menu {
     } else {
       $state = if ($s.Running) { 'läuft' } elseif ($s.Exists) { 'angehalten' } else { 'noch nicht angelegt' }
       Say "  (Container: $state)"
-      Say '  [1] starten und verbinden (Vorgabe)'
-      if ($Image -like '*:latest') { Say '  [2] auf das neueste Image aktualisieren' }
-      else { Say ("  [2] auf das Image {0} wechseln (Testmodus)" -f ($Image -replace '^.*:', '')) }
+      # Test mode (an image other than :latest): while the container still
+      # has another image, Enter switches to the requested one.
+      $testMode = $Image -notlike '*:latest'
+      $switch = Test-ImageSwitch $Image $s
+      $newTag = $Image -replace '^.*:', ''
+      if ($switch) {
+        $verb = if ($s.Running) { 'läuft noch mit' } else { 'ist noch angelegt mit' }
+        Say ("  Der Container {0} {1}; mit Enter wechseln Sie auf {2}." -f $verb, ((Get-UsedImage $s.Inspect) -replace '^.*:', ''), $newTag) 'Yellow'
+      } elseif ($testMode -and $s.Exists -and -not (ConvertTo-ImageKey (Get-UsedImage $s.Inspect))) {
+        Say ("  Welches Image der Container hat, ist nicht lesbar; mit [2] wechseln Sie auf {0}." -f $newTag)
+      }
+      $default = if ($switch) { '2' } else { '1' }
+      Say ("  [1] starten und verbinden{0}" -f $(if ($switch) { '' } else { ' (Vorgabe)' }))
+      if (-not $testMode) { Say '  [2] auf das neueste Image aktualisieren' }
+      else { Say ("  [2] auf das Image {0} wechseln (Testmodus){1}" -f ($Image -replace '^.*:', ''), $(if ($switch) { ' (Vorgabe)' } else { '' })) }
       Say '  [3] mitnehmen: Home als Sicherung speichern'
       Say '  [4] aus einer Sicherung importieren'
       Say '  [5] SSH für VS Code neu einrichten'
@@ -2021,10 +2265,11 @@ function Show-Menu {
       Say '  [9] VS Code starten'
       Say ' [10] VSCodePacks einrichten'
       Say ' [11] Kurse und Technikpakete'
+      Say ' [12] tmux-helper starten (tmux-Sitzungen als Tabs)'
       Say '  [0] beenden'
-      $a = Read-Host 'Auswahl [1]'
+      $a = Read-Host "Auswahl [$default]"
+      if ("$a".Trim() -eq '') { $a = $default }
       switch ($a) {
-        '' { Start-Clawbook; Sync-Packs; return }
         '1' { Start-Clawbook; Sync-Packs; return }
         '2' { Update-Clawbook; return }
         '3' { $null = Export-Home ''; return }
@@ -2040,6 +2285,7 @@ function Show-Menu {
           if ($script:LeaveMenu) { return }
         }
         '11' { Invoke-ContainerMenu; return }
+        '12' { Start-TmuxHelper; return }
         '0' { return }
         default { Say 'Bitte eine Zahl aus dem Menü eingeben.' 'Yellow' }
       }

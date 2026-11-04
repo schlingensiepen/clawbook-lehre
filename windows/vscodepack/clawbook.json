@@ -11,7 +11,8 @@
   ],
   "windows": {
     "erweiterungen": [
-      "ms-vscode-remote.remote-ssh"
+      "ms-vscode-remote.remote-ssh",
+      "schlingensiepen.tmux-sessions"
     ]
   },
   "container": {
@@ -19,7 +20,8 @@
       "ms-python.python",
       "ms-python.debugpy",
       "ms-python.vscode-pylance",
-      "charliermarsh.ruff"
+      "charliermarsh.ruff",
+      "foam.foam-vscode"
     ]
   },
   "einstellungen": {

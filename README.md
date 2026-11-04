@@ -67,8 +67,10 @@ Agenten laufen im Container gern lange in
 tmux-Sitzungen. [tmux-helper](https://github.com/schlingensiepen/tmux-helper)
 öffnet diese Sitzungen unter Windows als Tabs im Windows
 Terminal und verbindet sie per SSH — auch mit
-`clawbook`. Er ist ein eigenes Projekt mit eigenem
-Installationsbefehl und gehört nicht zum Image.
+`clawbook`. Er ist ein eigenes Projekt und gehört nicht
+zum Image; das Verwaltungs-Skript lädt und startet ihn
+über Menüpunkt **[12]** (braucht Windows Terminal, siehe
+[Installation](docs/installation.md), Abschnitt 4).
 
 ## Was entsteht hier?
 
